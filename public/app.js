@@ -156,6 +156,9 @@ function buildChunks(allBlocks) {
   const MIN_BLOCK = 30;
   let pendingImage = null;
   let shortBuf = '';
+  const isToc = t => /\.{4,}/.test(t);
+  const cleanToc = t => t.replace(/\.{4,}/g, ' ').replace(/[ \t]+/g, ' ').trim();
+  let tocBuf = [];
   const pushText = (text) => {
     const clean = String(text || '').trim();
     if (!clean) return;
@@ -166,6 +169,15 @@ function buildChunks(allBlocks) {
   };
   const pushMerged = (text) => {
     if (text.length <= CHUNK_MAX) { pushText(text); return; }
+    if (text.includes('\n')) {
+      let buf = '';
+      for (const line of text.split('\n')) {
+        if (buf && buf.length + line.length + 1 > CHUNK_MAX) { pushText(buf); buf = line; }
+        else buf = buf ? buf + '\n' + line : line;
+      }
+      pushText(buf);
+      return;
+    }
     let buf = '';
     for (const ch of text) {
       buf += ch;
@@ -178,10 +190,23 @@ function buildChunks(allBlocks) {
     pushText(buf);
   };
   const flushShort = () => { if (shortBuf.trim()) { pushMerged(shortBuf); shortBuf = ''; } };
+  const flushToc = () => { if (tocBuf.length) { pushMerged(tocBuf.join('\n')); tocBuf = []; } };
   for (const block of allBlocks) {
-    if (block.type === 'image') { flushShort(); pendingImage = block; continue; }
+    if (block.type === 'image') { flushShort(); flushToc(); pendingImage = block; continue; }
     const text = String(block.text || '');
     if (!text.trim()) continue;
+    if (/^\s*\d+\s*$/.test(text)) continue;
+    if (isToc(text)) {
+      flushShort();
+      for (const line of text.split('\n')) {
+        const cleaned = cleanToc(line);
+        if (!cleaned) continue;
+        tocBuf.push(cleaned);
+        if (tocBuf.join('\n').length >= CHUNK_MAX) flushToc();
+      }
+      continue;
+    }
+    flushToc();
     if (text.length < MIN_BLOCK) {
       shortBuf += (shortBuf ? '\n\n' : '') + text;
     } else {
@@ -190,6 +215,7 @@ function buildChunks(allBlocks) {
       pushMerged(merged);
     }
   }
+  flushToc();
   flushShort();
   if (pendingImage) chunks.push({ blocks: [pendingImage], paragraphs: [] });
   if (!chunks.length) chunks.push({ blocks: [], paragraphs: [] });
@@ -573,11 +599,18 @@ async function parsePdfFile(file, onProgress, signal) {
     const paraGap = Math.max(lineHeight * 1.5, 10);
     const needSpace = (prev, next) => /[A-Za-z0-9]$/.test(prev) && /^[A-Za-z0-9]/.test(next);
     const isSentenceEnd = t => /[。！？…」』”’）】〗]$/.test(t) || /[.!?]$/.test(t);
+    const isTocLine = t => /\.{4,}/.test(t);
     let paragraph = [];
     const flush = () => {
       if (!paragraph.length) return;
       let text = '';
-      for (let i = 0; i < paragraph.length; i++) { if (i > 0 && needSpace(paragraph[i - 1], paragraph[i])) text += ' '; text += paragraph[i]; }
+      for (let i = 0; i < paragraph.length; i++) {
+        if (i > 0) {
+          if (isTocLine(paragraph[i - 1]) && isTocLine(paragraph[i])) text += '\n';
+          else if (needSpace(paragraph[i - 1], paragraph[i])) text += ' ';
+        }
+        text += paragraph[i];
+      }
       paragraph = [];
       const cleaned = text.trim();
       if (cleaned) pageBlocks.push({ type: 'text', text: cleaned });
