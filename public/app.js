@@ -157,6 +157,7 @@ function buildChunks(allBlocks) {
   let pendingImage = null;
   let shortBuf = '';
   const isToc = t => /\.{4,}/.test(t);
+  const isTocEntry = t => { const s = String(t || '').trim(); return /\.{4,}/.test(s) || (s.length < 40 && /\d+\s*$/.test(s) && /[§第部卷篇章ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ\d]/.test(s)); };
   const cleanToc = t => t.replace(/\.{4,}/g, ' ').replace(/[ \t]+/g, ' ').trim();
   let tocBuf = [];
   const pushText = (text) => {
@@ -190,13 +191,13 @@ function buildChunks(allBlocks) {
     pushText(buf);
   };
   const flushShort = () => { if (shortBuf.trim()) { pushMerged(shortBuf); shortBuf = ''; } };
-  const flushToc = () => { if (tocBuf.length) { pushMerged(tocBuf.join('\n')); tocBuf = []; } };
+  const flushToc = () => { if (tocBuf.length) { pushText(tocBuf.join('\n')); tocBuf = []; } };
   for (const block of allBlocks) {
     if (block.type === 'image') { flushShort(); flushToc(); pendingImage = block; continue; }
     const text = String(block.text || '');
     if (!text.trim()) continue;
     if (/^\s*\d+\s*$/.test(text)) continue;
-    if (isToc(text)) {
+    if (isTocEntry(text)) {
       flushShort();
       for (const line of text.split('\n')) {
         const cleaned = cleanToc(line);
