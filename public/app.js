@@ -260,7 +260,7 @@ function renderRecallNotes() {
 function render() {
   const section = sections[current];
   sectionLabel.textContent = section.label;
-  const contentHtml = section.blocks ? section.blocks.map(block => block.type === 'image' ? `<figure class="article-image"><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '文中配图')}" loading="lazy"><figcaption>${escapeHtml(block.alt || '文中配图')}</figcaption></figure>` : String(block.text || '').split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escapeHtml(p)}</p>`).join('')).join('') : section.paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
+  const contentHtml = section.blocks ? section.blocks.map(block => block.type === 'image' ? `<figure class="article-image"><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '文中配图')}" loading="lazy"><figcaption>${escapeHtml(block.alt || '文中配图')}</figcaption></figure>` : String(block.text || '').split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')).join('') : section.paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
   body.innerHTML = `<h3>${escapeHtml(section.label)}</h3>${contentHtml}${section.quote ? `<div class="pullquote">${escapeHtml(section.quote)}</div>` : ''}`;
   const progress = Math.round((completed.size / sections.length) * 100);
   libraryProgress.textContent = `${progress}%`;
