@@ -456,9 +456,8 @@ document.getElementById('webShare').addEventListener('click', async () => {
 
 document.getElementById('checkRecall').addEventListener('click', () => {
   const text = document.getElementById('recallInput').value.trim();
-  if (!text) { setResponse('先写两句', '不用写得完整。你现在认为作者最想说的是什么？哪怕只是一个暂时的答案。'); return; }
-  const feedback = text.length < 25 ? '你已经抓到一个方向，但还可以补一句“为什么”。试着把作者的判断和一个具体例子连起来。' : '你的复述已经有自己的语言了。再检查一遍：你说的是作者原本的判断，还是你从文章里延伸出的判断？';
-  setResponse('复述反馈', feedback);
+  if (!text) { setResponse('先写两句', '用自己的话说说，作者这一节最想说的是什么。'); return; }
+  setResponse('复述已记录', '可以再对照原文检查一遍：写的是作者原本的判断，还是你延伸出的理解？');
   recallNotes.push({ sectionLabel: sections[current].label, text, time: new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) });
   renderRecallNotes();
   document.getElementById('recallInput').value = '';
