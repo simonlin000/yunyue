@@ -157,7 +157,7 @@ function buildChunks(allBlocks) {
   let pendingImage = null;
   let shortBuf = '';
   const isToc = t => /\.{4,}/.test(t);
-  const isTocEntry = t => { const s = String(t || '').trim(); return /\.{4,}/.test(s) || (s.length < 40 && /\d+\s*$/.test(s) && /[§第部卷篇章ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ\d]/.test(s)); };
+  const isTocEntry = t => { const s = String(t || '').trim(); return /\.{4,}/.test(s) || (/^[§第部卷篇章ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]/.test(s) && s.length < 40 && /\d+\s*$/.test(s)); };
   const cleanToc = t => t.replace(/\.{4,}/g, ' ').replace(/[ \t]+/g, ' ').trim();
   let tocBuf = [];
   const pushText = (text) => {
@@ -170,15 +170,6 @@ function buildChunks(allBlocks) {
   };
   const pushMerged = (text) => {
     if (text.length <= CHUNK_MAX) { pushText(text); return; }
-    if (text.includes('\n')) {
-      let buf = '';
-      for (const line of text.split('\n')) {
-        if (buf && buf.length + line.length + 1 > CHUNK_MAX) { pushText(buf); buf = line; }
-        else buf = buf ? buf + '\n' + line : line;
-      }
-      pushText(buf);
-      return;
-    }
     let buf = '';
     for (const ch of text) {
       buf += ch;
@@ -188,12 +179,24 @@ function buildChunks(allBlocks) {
         buf = '';
       }
     }
-    pushText(buf);
+    if (buf) {
+      const clean = buf.trim();
+      if (clean.length < MIN_BLOCK && chunks.length) {
+        const last = chunks[chunks.length - 1];
+        if (last.paragraphs && last.paragraphs.length) {
+          last.paragraphs[0] += clean;
+          const tb = last.blocks && last.blocks[last.blocks.length - 1];
+          if (tb && tb.type === 'text') tb.text += clean;
+          return;
+        }
+      }
+      pushText(buf);
+    }
   };
   const flushShort = () => { if (shortBuf.trim()) { pushMerged(shortBuf); shortBuf = ''; } };
   const flushToc = () => { if (tocBuf.length) { pushText(tocBuf.join('\n')); tocBuf = []; } };
   for (const block of allBlocks) {
-    if (block.type === 'image') { flushShort(); flushToc(); pendingImage = block; continue; }
+    if (block.type === 'image') { flushToc(); pendingImage = block; continue; }
     const text = String(block.text || '');
     if (!text.trim()) continue;
     if (/^\s*\d+\s*$/.test(text)) continue;
@@ -209,6 +212,7 @@ function buildChunks(allBlocks) {
     }
     flushToc();
     if (text.length < MIN_BLOCK) {
+      if (/^[”’]\s*\d{1,3}\s*$/.test(text.trim())) continue;
       shortBuf += (shortBuf ? '\n\n' : '') + text;
     } else {
       const merged = shortBuf.trim() ? (shortBuf + '\n\n' + text) : text;
