@@ -316,7 +316,6 @@ document.getElementById('nextSection').addEventListener('click', () => {
   completed.add(current);
   if (current < sections.length - 1) current += 1;
   render();
-  setResponse('这一块读完了', current === sections.length - 1 ? '你已读完这篇的全部内容。' : '继续读下一块。');
 });
 
 document.querySelectorAll('.prompt-card').forEach(button => button.addEventListener('click', async () => {
@@ -457,7 +456,7 @@ document.getElementById('webShare').addEventListener('click', async () => {
 document.getElementById('checkRecall').addEventListener('click', () => {
   const text = document.getElementById('recallInput').value.trim();
   if (!text) { setResponse('先写两句', '用自己的话说说，作者这一节最想说的是什么。'); return; }
-  setResponse('复述已记录', '可以再对照原文检查一遍：写的是作者原本的判断，还是你延伸出的理解？');
+  setResponse('已记录', '');
   recallNotes.push({ sectionLabel: sections[current].label, text, time: new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) });
   renderRecallNotes();
   document.getElementById('recallInput').value = '';
@@ -558,7 +557,7 @@ async function parsePdfFile(file, onProgress, signal) {
     for (let i = 0; i < lines.length; i++) {
       paragraph.push(lines[i].text);
       const gap = i + 1 < lines.length ? Math.abs(lines[i + 1].y - lines[i].y) : 0;
-      if (isSentenceEnd(lines[i].text.trim()) || gap > paraGap) flush();
+      if (gap > paraGap) flush();
     }
     flush();
     if (/^\s*\d+\s*$/.test(pageBlocks[pageBlocks.length - 1]?.text || '')) pageBlocks.pop();
