@@ -1,0 +1,17 @@
+{
+  "name": "reading-room",
+  "main": "api-worker.js",
+  "workers_dev": true,
+  "compatibility_date": "2026-08-01",
+  "assets": {
+    "directory": "./public"
+  },
+  "r2_buckets": [{ "binding": "R2", "bucket_name": "reading-room-assets" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "reading-room-db",
+      "database_id": "在此填入你的 D1 database_id"
+    }
+  ]
+}

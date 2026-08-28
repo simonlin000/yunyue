@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>云阅</title>
+  <link rel="stylesheet" href="styles.css?v=21">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">云</span><span>云阅</span></div>
+      <div class="top-actions">
+        <button class="icon-button" id="focusMode" title="深色模式" aria-label="切换深色模式">◐</button>
+        <button class="ghost-button top-ghost" id="skinSettings" title="更换云阅皮肤">皮肤</button>
+        <button class="ghost-button top-ghost" id="modelSettings" title="配置伴读模型">模型设置</button>
+        <button class="ghost-button top-ghost" id="importArticle">导入文件</button>
+        <button class="icon-button menu-toggle" id="menuToggle" aria-label="更多操作" aria-expanded="false">⋯</button>
+        <input type="file" id="fileInput" accept=".md,.txt,.markdown,.pdf,.docx,.doc" hidden>
+      </div>
+    </header>
+    <div class="mobile-menu" id="mobileMenu">
+      <div class="mobile-menu-head"><span>更多</span><button type="button" class="icon-button" id="menuClose" aria-label="关闭">×</button></div>
+      <button type="button" class="mobile-menu-item" id="menuSkin">更换皮肤</button>
+      <button type="button" class="mobile-menu-item" id="menuModel">模型设置</button>
+      <button type="button" class="mobile-menu-item" id="menuImport">导入文件</button>
+    </div>
+    <div class="import-progress" id="importProgress" hidden><div class="import-progress-track"><span id="importProgressBar"></span></div><span class="import-progress-text" id="importProgressText"></span><button type="button" class="import-cancel" id="importCancel">取消</button></div>
+
+    <section class="workspace">
+      <aside class="library-panel">
+        <div class="panel-heading"><span>我的阅读</span><button class="new-button" id="newArticle" title="新建文章">＋</button></div>
+        <div class="library-item active"><div class="item-kicker">正在阅读</div><strong id="libraryTitle">为什么我们越来越难读完一篇长文章</strong><div class="item-meta"><span id="libraryProgress">0%</span><span>今天</span></div><div class="progress-track"><span id="libraryProgressBar"></span></div></div>
+        <div class="library-item muted"><div class="item-kicker">稍后阅读</div><div id="readLaterList"><div class="readlater-empty">还没有保存的进度</div></div></div>
+        <div class="library-footer"><span>本周阅读</span><strong id="weeklyMinutes">0 分钟</strong></div>
+      </aside>
+
+      <article class="reading-panel">
+        <div class="article-head">
+          <div class="eyebrow" id="eyebrow">示范文章 · 伴读模式</div>
+          <h1 id="articleTitle">为什么我们越来越难读完一篇长文章</h1>
+          <p class="dek" id="articleDek">问题可能不只是注意力变短，而是我们越来越难以把自己交给一个尚未结束的问题。</p>
+          <div class="article-meta"><span id="articleMetaTime">约 12 分钟</span><span>·</span><span id="articleMetaSections">3 个章节</span><span>·</span><span id="readState">刚开始</span></div>
+        </div>
+        <div class="reader-toolbar"><span id="sectionLabel">第一节 · 先别急着怪注意力</span><button class="text-button" id="saveLater" title="保存当前进度到稍后阅读">稍后阅读</button></div>
+        <div class="article-body" id="articleBody"></div>
+        <div class="selection-ask" id="selectionAsk" hidden>
+          <span class="selection-preview" id="selectionPreview"></span>
+          <input id="selectionQuestion" type="text" placeholder="问这段内容…" aria-label="输入关于划线内容的问题">
+          <button type="button" id="askSelection">提问</button>
+          <button type="button" id="shareSelection" title="生成分享卡片">分享</button>
+        </div>
+        <div class="reader-footer"><button class="footer-button" id="prevSection">← 上一块</button><span id="footerProgress">读到 0%</span><button class="footer-button" id="nextSection">下一块 →</button></div>
+      </article>
+
+      <aside class="companion-panel">
+        <div class="companion-header"><div><div class="eyebrow">云阅</div><h2>伴读</h2></div><span class="status-dot" title="伴读在线"></span></div>
+        <div class="companion-mode">
+          <div class="mode-head"><span class="mode-label">伴读模式</span><button type="button" class="text-button" id="customModeBtn">＋ 自定义</button></div>
+          <div class="mode-chips" id="modeChips"></div>
+        </div>
+        <div class="prompt-stack">
+          <button class="prompt-card" data-action="explain"><span class="prompt-icon">?</span><span><strong>这段在说什么？</strong><small>只解释当前这一节，不剧透全文</small></span></button>
+          <button class="prompt-card" data-action="question"><span class="prompt-icon">↗</span><span><strong>给我一个阅读问题</strong><small>先自己想，再看回应</small></span></button>
+          <button class="prompt-card" data-action="challenge"><span class="prompt-icon">≠</span><span><strong>帮我挑一个漏洞</strong><small>区分事实、推断和修辞</small></span></button>
+          <button class="prompt-card summary-card" data-action="summary"><span class="prompt-icon">◎</span><span><strong>读后梳理全文</strong><small>提炼主线、论证和待验证之处</small></span></button>
+        </div>
+        <div class="coach-response" id="coachResponse"><div class="response-label">伴读提示</div></div>
+        <div class="recall-box"><div class="response-label">读后复述</div><textarea id="recallInput" placeholder="不用写得漂亮，用你自己的话说..." rows="4"></textarea><button class="primary-button" id="checkRecall">让我看看我的理解</button></div>
+        <div class="session-note" id="sessionNote">本次阅读还没有留下笔记</div>
+      </aside>
+    </section>
+    <dialog class="skin-dialog" id="skinDialog">
+      <form method="dialog" class="skin-form" id="skinForm">
+        <div class="dialog-head"><div><div class="eyebrow">云阅外观</div><h2>选择一套皮肤</h2></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+        <div class="skin-grid" id="skinGrid"></div>
+        <div class="custom-skin"><div class="response-label">自定义</div><div class="color-fields"><label>纸张<input id="customPaper" type="color" value="#fbfaf7"></label><label>文字<input id="customInk" type="color" value="#252522"></label><label>强调<input id="customAccent" type="color" value="#c45c36"></label></div><button type="button" class="ghost-button" id="applyCustomSkin">应用自定义颜色</button><div class="skin-file-actions"><button type="button" class="ghost-button" id="importSkin">导入皮肤文件</button><button type="button" class="ghost-button" id="exportSkin">导出当前皮肤</button><input type="file" id="skinFileInput" accept=".json,application/json" hidden></div><p class="skin-status" id="skinStatus" role="status"></p></div>
+      </form>
+    </dialog>
+    <dialog class="settings-dialog" id="settingsDialog">
+    <form method="dialog" class="settings-form" id="settingsForm">
+      <div class="dialog-head"><div><div class="eyebrow">伴读模型</div><h2>接入你自己的 API</h2></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+      <p class="dialog-note">密钥只保存在本次阅读会话的服务端存储中，不会写进网页或 URL。导入的文档仍优先保存在你的浏览器本地。</p>
+      <label>模型厂商<select id="providerSelect"></select></label>
+      <label>API key<input id="apiKeyInput" type="password" autocomplete="off" placeholder="sk-..."></label>
+      <label>模型名<input id="modelInput" placeholder="使用默认模型"></label>
+      <p class="dialog-hint" id="providerHint"></p>
+      <div class="dialog-actions"><button class="ghost-button" value="cancel">取消</button><button class="primary-button" id="saveSettings" value="default">保存设置</button></div>
+      <p class="dialog-status" id="settingsStatus" role="status"></p>
+    </form>
+  </dialog>
+  <dialog class="settings-dialog mode-dialog" id="modeDialog">
+    <form method="dialog" class="settings-form" id="modeForm">
+      <div class="dialog-head"><div><div class="eyebrow">自定义伴读模式</div><h2>定义一个新的解释方向</h2></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+      <p class="dialog-note">起个名字，写一段提示词，告诉伴读“用什么视角、往哪个方向解释”。保存后出现在模式列表里，只存本机。</p>
+      <label>模式名<input id="modeName" type="text" placeholder="例如：属灵视角 / 亲子共读"></label>
+      <label>提示词<textarea id="modePromptInput" rows="6" placeholder="例如：你是一位有信仰背景的阅读者，请从信仰与价值观的角度解释这段话…"></textarea></label>
+      <div class="mode-file-actions"><button type="button" class="ghost-button" id="importModeFile">导入提示词文件</button><input type="file" id="modeFileInput" accept=".txt,.md,.json" hidden></div>
+      <div class="dialog-actions"><button class="ghost-button" value="cancel">取消</button><button class="primary-button" id="saveMode" value="default">保存模式</button></div>
+      <p class="dialog-status" id="modeStatus" role="status"></p>
+    </form>
+  </dialog>
+  <dialog class="share-dialog" id="shareDialog">
+    <div class="share-dialog-head"><span>分享卡片</span><button type="button" class="icon-button" id="shareClose" aria-label="关闭">×</button></div>
+    <div class="share-card-wrap"><img id="shareCardImg" alt="分享卡片"></div>
+    <div class="share-actions">
+      <button type="button" class="primary-button" id="downloadShare">保存图片</button>
+      <button type="button" class="ghost-button" id="copyShareText">复制文本</button>
+      <button type="button" class="ghost-button" id="webShare">分享</button>
+    </div>
+  </dialog>
+  </main>
+  <script src="app.js?v=25"></script>

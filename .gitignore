@@ -1,0 +1,7 @@
+.wrangler/
+node_modules/
+/app.js
+/index.html
+/styles.css
+*.log
+.DS_Store
