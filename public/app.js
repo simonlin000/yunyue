@@ -222,6 +222,8 @@ const libraryProgressBar = document.getElementById('libraryProgressBar');
 const readState = document.getElementById('readState');
 const response = document.getElementById('coachResponse');
 const note = document.getElementById('sessionNote');
+const tocToggle = document.getElementById('tocToggle');
+const tocList = document.getElementById('tocList');
 
 function renderRecallNotes() {
   if (!recallNotes.length) { note.innerHTML = '本次阅读还没有留下笔记'; return; }
@@ -242,7 +244,33 @@ function render() {
   if (nextButton) nextButton.textContent = current === sections.length - 1 ? '✓ 标记读完' : '下一块 →';
   const prevButton = document.getElementById('prevSection');
   if (prevButton) prevButton.disabled = current === 0;
+  renderToc();
 }
+
+function renderToc() {
+  if (!tocList) return;
+  tocList.innerHTML = sections.map((s, i) => {
+    const preview = s.paragraphs && s.paragraphs.length ? s.paragraphs[0].replace(/\s+/g, '').slice(0, 16) : '配图';
+    const active = i === current ? ' active' : '';
+    return `<button type="button" class="toc-item${active}" data-index="${i}"><span class="toc-num">${i + 1}</span><span class="toc-preview">${escapeHtml(preview)}</span></button>`;
+  }).join('');
+}
+
+tocToggle.addEventListener('click', () => {
+  const expanded = tocList.hidden;
+  tocList.hidden = !expanded;
+  tocToggle.setAttribute('aria-expanded', String(expanded));
+  tocToggle.querySelector('.toc-caret').textContent = expanded ? '▾' : '▸';
+});
+
+tocList.addEventListener('click', (event) => {
+  const item = event.target.closest('.toc-item');
+  if (!item) return;
+  current = Number(item.dataset.index);
+  render();
+  const articleBody = document.getElementById('articleBody');
+  if (articleBody) articleBody.scrollTop = 0;
+});
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));

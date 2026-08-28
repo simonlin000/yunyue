@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>云阅</title>
-  <link rel="stylesheet" href="styles.css?v=21">
+  <link rel="stylesheet" href="styles.css?v=22">
 </head>
 <body>
   <main class="app-shell">
@@ -31,6 +31,10 @@
       <aside class="library-panel">
         <div class="panel-heading"><span>我的阅读</span><button class="new-button" id="newArticle" title="新建文章">＋</button></div>
         <div class="library-item active"><div class="item-kicker">正在阅读</div><strong id="libraryTitle">为什么我们越来越难读完一篇长文章</strong><div class="item-meta"><span id="libraryProgress">0%</span><span>今天</span></div><div class="progress-track"><span id="libraryProgressBar"></span></div></div>
+        <div class="toc-block">
+          <button type="button" class="toc-toggle" id="tocToggle" aria-expanded="false">目录 <span class="toc-caret" aria-hidden="true">▸</span></button>
+          <nav class="toc-list" id="tocList" hidden></nav>
+        </div>
         <div class="library-item muted"><div class="item-kicker">稍后阅读</div><div id="readLaterList"><div class="readlater-empty">还没有保存的进度</div></div></div>
         <div class="library-footer"><span>本周阅读</span><strong id="weeklyMinutes">0 分钟</strong></div>
       </aside>
@@ -110,4 +114,4 @@
     </div>
   </dialog>
   </main>
-  <script src="app.js?v=27"></script>
+  <script src="app.js?v=28"></script>
