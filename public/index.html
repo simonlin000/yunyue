@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>云阅</title>
-  <link rel="stylesheet" href="styles.css?v=32">
+  <link rel="stylesheet" href="styles.css?v=33">
 </head>
 <body>
   <main class="app-shell">
@@ -14,6 +14,7 @@
         <button class="icon-button" id="focusMode" title="深色模式" aria-label="切换深色模式">◐</button>
         <button class="ghost-button top-ghost" id="skinSettings" title="更换云阅皮肤">皮肤</button>
         <button class="ghost-button top-ghost" id="modelSettings" title="配置伴读模型">模型设置</button>
+        <button class="ghost-button top-ghost" id="importLinkBtn" title="导入公众号文章链接">导入链接</button>
         <button class="ghost-button top-ghost" id="importArticle">导入文件</button>
         <button class="icon-button menu-toggle" id="menuToggle" aria-label="更多操作" aria-expanded="false">⋯</button>
         <input type="file" id="fileInput" accept=".md,.txt,.markdown,.pdf,.docx,.doc" hidden>
@@ -23,14 +24,16 @@
       <div class="mobile-menu-head"><span>更多</span><button type="button" class="icon-button" id="menuClose" aria-label="关闭">×</button></div>
       <button type="button" class="mobile-menu-item" id="menuSkin">更换皮肤</button>
       <button type="button" class="mobile-menu-item" id="menuModel">模型设置</button>
+      <button type="button" class="mobile-menu-item" id="menuShelf">书架</button>
+      <button type="button" class="mobile-menu-item" id="menuLink">导入文章链接</button>
       <button type="button" class="mobile-menu-item" id="menuImport">导入文件</button>
     </div>
     <div class="import-progress" id="importProgress" hidden><div class="import-progress-track"><span id="importProgressBar"></span></div><span class="import-progress-text" id="importProgressText"></span><button type="button" class="import-cancel" id="importCancel">取消</button></div>
 
     <section class="workspace">
       <aside class="library-panel">
-        <div class="panel-heading"><span>我的阅读</span><button class="new-button" id="newArticle" title="新建文章">＋</button></div>
-        <div class="library-item active"><div class="item-kicker">正在阅读</div><strong id="libraryTitle">为什么我们越来越难读完一篇长文章</strong><div class="item-meta"><span id="libraryProgress">0%</span><span>今天</span></div><div class="progress-track"><span id="libraryProgressBar"></span></div></div>
+        <div class="panel-heading"><span>书架</span><button class="new-button" id="newArticle" title="导入文件到书架">＋</button></div>
+        <div id="shelfList"><div class="readlater-empty">加载中…</div></div>
         <div class="toc-block">
           <button type="button" class="toc-toggle" id="tocToggle" aria-expanded="false">目录 <span class="toc-caret" aria-hidden="true">▸</span></button>
           <nav class="toc-list" id="tocList" hidden></nav>
@@ -113,5 +116,21 @@
       <button type="button" class="ghost-button" id="webShare">分享</button>
     </div>
   </dialog>
+  <dialog class="settings-dialog shelf-dialog" id="shelfDialog">
+    <div class="settings-form">
+      <div class="dialog-head"><div><div class="eyebrow">云阅书架</div><h2>书架</h2></div><button type="button" class="icon-button" id="shelfClose" aria-label="关闭">×</button></div>
+      <p class="dialog-note">导入的文件和链接都存在这里，换一篇读不掉进度。</p>
+      <div id="shelfDialogList"></div>
+    </div>
+  </dialog>
+  <dialog class="settings-dialog link-dialog" id="linkDialog">
+    <form method="dialog" class="settings-form" id="linkForm">
+      <div class="dialog-head"><div><div class="eyebrow">云阅导入</div><h2>导入文章链接</h2></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+      <p class="dialog-note">粘贴公众号文章链接，云阅抓取正文和配图后放进书架。其他网页也可以试试。</p>
+      <label>文章链接<input id="linkUrl" type="url" placeholder="https://mp.weixin.qq.com/s/..." inputmode="url"></label>
+      <div class="dialog-actions"><button class="ghost-button" value="cancel">取消</button><button class="primary-button" id="importLink" value="default">抓取导入</button></div>
+      <p class="dialog-status" id="linkStatus" role="status"></p>
+    </form>
+  </dialog>
   </main>
-  <script src="app.js?v=42"></script>
+  <script src="app.js?v=43"></script>
