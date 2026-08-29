@@ -152,11 +152,9 @@ async function loadImportedDocument() {
 }
 function buildChunks(allBlocks) {
   const chunks = [];
-  const CHUNK_MAX = 500;
-  const MIN_BLOCK = 30;
+  const CHUNK_MAX = 1500;
   let pendingImage = null;
-  let shortBuf = '';
-  const isToc = t => /\.{4,}/.test(t);
+  let bodyBuf = '';
   const isTocEntry = t => { const s = String(t || '').trim(); return /\.{4,}/.test(s) || (/^[§第部卷篇章ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]/.test(s) && s.length < 40 && /\d+\s*$/.test(s)); };
   const cleanToc = t => t.replace(/\.{4,}/g, ' ').replace(/[ \t]+/g, ' ').trim();
   let tocBuf = [];
@@ -168,40 +166,32 @@ function buildChunks(allBlocks) {
     blocks.push({ type: 'text', text: clean });
     chunks.push({ blocks, paragraphs: [clean] });
   };
-  const pushMerged = (text) => {
-    if (text.length <= CHUNK_MAX) { pushText(text); return; }
-    let buf = '';
-    for (const ch of text) {
-      buf += ch;
-      const atSentenceEnd = '。！？；!?;'.includes(ch);
-      if ((atSentenceEnd && buf.length >= CHUNK_MAX * 0.6) || buf.length >= CHUNK_MAX + 100) {
-        pushText(buf);
-        buf = '';
+  const cutBody = () => {
+    while (bodyBuf.length >= CHUNK_MAX) {
+      const window = bodyBuf.slice(0, CHUNK_MAX + 50);
+      let cut = -1;
+      for (const sep of '。！？；!?;') {
+        const i = window.lastIndexOf(sep);
+        if (i > cut) cut = i;
       }
-    }
-    if (buf) {
-      const clean = buf.trim();
-      if (clean.length < MIN_BLOCK && chunks.length) {
-        const last = chunks[chunks.length - 1];
-        if (last.paragraphs && last.paragraphs.length) {
-          last.paragraphs[0] += clean;
-          const tb = last.blocks && last.blocks[last.blocks.length - 1];
-          if (tb && tb.type === 'text') tb.text += clean;
-          return;
-        }
+      if (cut >= CHUNK_MAX - 250) {
+        pushText(bodyBuf.slice(0, cut + 1));
+        bodyBuf = bodyBuf.slice(cut + 1).replace(/^\s+/, '');
+      } else {
+        pushText(bodyBuf.slice(0, CHUNK_MAX));
+        bodyBuf = bodyBuf.slice(CHUNK_MAX);
       }
-      pushText(buf);
     }
   };
-  const flushShort = () => { if (shortBuf.trim()) { pushMerged(shortBuf); shortBuf = ''; } };
+  const flushBody = () => { if (bodyBuf.trim()) { pushText(bodyBuf); bodyBuf = ''; } };
   const flushToc = () => { if (tocBuf.length) { pushText(tocBuf.join('\n')); tocBuf = []; } };
   for (const block of allBlocks) {
-    if (block.type === 'image') { flushToc(); pendingImage = block; continue; }
+    if (block.type === 'image') { flushToc(); flushBody(); pendingImage = block; continue; }
     const text = String(block.text || '');
     if (!text.trim()) continue;
     if (/^\s*\d+\s*$/.test(text)) continue;
     if (isTocEntry(text)) {
-      flushShort();
+      flushBody();
       for (const line of text.split('\n')) {
         const cleaned = cleanToc(line);
         if (!cleaned) continue;
@@ -211,17 +201,12 @@ function buildChunks(allBlocks) {
       continue;
     }
     flushToc();
-    if (text.length < MIN_BLOCK) {
-      if (/^[”’]\s*\d{1,3}\s*$/.test(text.trim())) continue;
-      shortBuf += (shortBuf ? '\n\n' : '') + text;
-    } else {
-      const merged = shortBuf.trim() ? (shortBuf + '\n\n' + text) : text;
-      shortBuf = '';
-      pushMerged(merged);
-    }
+    if (/^[”’]\s*\d{1,3}\s*$/.test(text.trim())) continue;
+    bodyBuf += (bodyBuf ? '\n\n' : '') + text;
+    cutBody();
   }
   flushToc();
-  flushShort();
+  flushBody();
   if (pendingImage) chunks.push({ blocks: [pendingImage], paragraphs: [] });
   if (!chunks.length) chunks.push({ blocks: [], paragraphs: [] });
   return chunks;
