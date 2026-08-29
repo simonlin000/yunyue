@@ -880,23 +880,25 @@ const settingsDialog = document.getElementById('settingsDialog');
 const providerSelect = document.getElementById('providerSelect');
 const modelInput = document.getElementById('modelInput');
 const apiKeyInput = document.getElementById('apiKeyInput');
+const baseUrlRow = document.getElementById('baseUrlRow');
+const baseUrlInput = document.getElementById('baseUrlInput');
 const settingsStatus = document.getElementById('settingsStatus');
 let providers = {};
 async function loadProviders() {
   try {
     const data = await api('./api/providers'); providers = data.providers;
     providerSelect.innerHTML = Object.entries(providers).map(([key, item]) => `<option value="${key}">${item.label}</option>`).join('');
-    if (data.configured) { providerSelect.value = data.configured; modelInput.value = data.model || ''; document.body.dataset.modelConfigured = 'true'; }
+    if (data.configured) { providerSelect.value = data.configured; modelInput.value = data.model || ''; if (data.base_url) baseUrlInput.value = data.base_url; document.body.dataset.modelConfigured = 'true'; }
     updateProviderHint();
   } catch (_) { settingsStatus.textContent = '本地服务未连接，模型功能暂不可用。'; }
 }
-function updateProviderHint() { const item = providers[providerSelect.value]; document.getElementById('providerHint').textContent = item ? `${item.base_url} · ${providerInfo[providerSelect.value]}` : ''; if (item && !modelInput.value) modelInput.placeholder = item.model; }
+function updateProviderHint() { const key = providerSelect.value; const item = providers[key]; if (key === 'custom') { baseUrlRow.hidden = false; document.getElementById('providerHint').textContent = '填你的中转站地址，需兼容 OpenAI 接口（以 https:// 开头，一般以 /v1 结尾）'; modelInput.placeholder = '必填，例如 gpt-4o-mini'; return; } baseUrlRow.hidden = true; document.getElementById('providerHint').textContent = item ? `${item.base_url} · ${providerInfo[key]}` : ''; if (item && !modelInput.value) modelInput.placeholder = item.model; }
 document.getElementById('modelSettings').addEventListener('click', () => { settingsStatus.textContent = ''; if (typeof settingsDialog.showModal === 'function') settingsDialog.showModal(); else { settingsDialog.classList.add('fallback-open'); settingsDialog.setAttribute('open', ''); } });
 providerSelect.addEventListener('change', () => { modelInput.value = ''; updateProviderHint(); });
 document.getElementById('settingsForm').addEventListener('submit', async event => {
   event.preventDefault();
   settingsStatus.textContent = '正在保存...';
-  try { const data = await api('./api/settings', {method:'POST', body: JSON.stringify({provider: providerSelect.value, api_key: apiKeyInput.value, model: modelInput.value})}); document.body.dataset.modelConfigured = 'true'; apiKeyInput.value = ''; settingsStatus.textContent = `已连接 ${providers[data.provider].label} · ${data.model}`; setTimeout(() => settingsDialog.close(), 600); }
+  try { const data = await api('./api/settings', {method:'POST', body: JSON.stringify({provider: providerSelect.value, api_key: apiKeyInput.value, model: modelInput.value, base_url: baseUrlInput.value})}); document.body.dataset.modelConfigured = 'true'; apiKeyInput.value = ''; settingsStatus.textContent = `已连接 ${providers[data.provider].label} · ${data.model}`; setTimeout(() => settingsDialog.close(), 600); }
   catch (error) { settingsStatus.textContent = error.message; }
 });
 document.querySelectorAll('[value="cancel"]').forEach(button => button.addEventListener('click', () => { settingsDialog.close ? settingsDialog.close() : settingsDialog.classList.remove('fallback-open'); }));

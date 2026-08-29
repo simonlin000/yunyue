@@ -89,6 +89,7 @@
       <div class="dialog-head"><div><div class="eyebrow">伴读模型</div><h2>接入你自己的 API</h2></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
       <p class="dialog-note">密钥只保存在本次阅读会话的服务端存储中，不会写进网页或 URL。导入的文档仍优先保存在你的浏览器本地。</p>
       <label>模型厂商<select id="providerSelect"></select></label>
+      <label id="baseUrlRow" hidden>接口地址<input id="baseUrlInput" type="url" autocomplete="off" placeholder="https://你的中转站/v1"></label>
       <label>API key<input id="apiKeyInput" type="password" autocomplete="off" placeholder="sk-..."></label>
       <label>模型名<input id="modelInput" placeholder="使用默认模型"></label>
       <p class="dialog-hint" id="providerHint"></p>
@@ -133,4 +134,4 @@
     </form>
   </dialog>
   </main>
-  <script src="app.js?v=43"></script>
+  <script src="app.js?v=44"></script>
