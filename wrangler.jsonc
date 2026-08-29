@@ -11,7 +11,7 @@
     {
       "binding": "DB",
       "database_name": "reading-room-db",
-      "database_id": "ceae7c4e-d9e3-4458-be5f-4fd0350da03e"
+      "database_id": "your-database-id"
     }
   ]
 }
