@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>云阅</title>
-  <link rel="stylesheet" href="styles.css?v=37">
+  <link rel="stylesheet" href="styles.css?v=38">
 </head>
 <body>
   <main class="app-shell">
@@ -91,6 +91,7 @@
       <form method="dialog" class="skin-form" id="skinForm">
         <div class="dialog-head"><div><div class="eyebrow">云阅外观</div><h2>选择一套皮肤</h2></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
         <div class="skin-grid" id="skinGrid"></div>
+        <div class="font-picker"><div class="response-label">正文字体</div><div class="font-options" id="fontOptions"></div><div class="skin-file-actions"><button type="button" class="ghost-button" id="importFont">导入字体文件</button><input type="file" id="fontFileInput" accept=".ttf,.otf,.woff,.woff2" hidden></div><p class="font-status" id="fontStatus" role="status"></p></div>
         <div class="custom-skin"><div class="response-label">自定义</div><div class="color-fields"><label>纸张<input id="customPaper" type="color" value="#fbfaf7"></label><label>文字<input id="customInk" type="color" value="#252522"></label><label>强调<input id="customAccent" type="color" value="#c45c36"></label></div><button type="button" class="ghost-button" id="applyCustomSkin">应用自定义颜色</button><div class="skin-file-actions"><button type="button" class="ghost-button" id="importSkin">导入皮肤文件</button><button type="button" class="ghost-button" id="exportSkin">导出当前皮肤</button><input type="file" id="skinFileInput" accept=".json,application/json" hidden></div><p class="skin-status" id="skinStatus" role="status"></p></div>
       </form>
     </dialog>
@@ -144,4 +145,4 @@
     </form>
   </dialog>
   </main>
-  <script src="app.js?v=52"></script>
+  <script src="app.js?v=53"></script>

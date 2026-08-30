@@ -23,6 +23,80 @@ function applySkin(name, custom = null, persist = true) {
   document.querySelectorAll('.skin-option').forEach(option => option.classList.toggle('selected', option.dataset.skin === name));
 }
 
+const FONT_FAMILY_KEY = 'reading-room-font';
+const CUSTOM_FONT_NAME = 'Yunyue Custom Font';
+const FONT_PRESETS = [
+  { id: 'default', label: '默认字体', note: '系统宋体，随皮肤配色', stack: '' },
+  { id: 'songti', label: '思源宋体', note: '印刷感强，长文阅读友好', stack: "'Source Han Serif SC VF'", css: 'https://cdn.jsdelivr.net/npm/cn-fontsource-source-han-serif-sc-vf-regular@1.0.1/font.css' },
+  { id: 'heiti', label: '思源黑体', note: '现代无衬线，屏幕清晰', stack: "'Source Han Sans SC VF'", css: 'https://cdn.jsdelivr.net/npm/cn-fontsource-source-han-sans-sc-vf@1.0.10/font.css' },
+  { id: 'kaiti', label: '霞鹜文楷', note: '楷体手写感，温润耐读', stack: "'LXGW WenKai Screen'", css: 'https://cdn.jsdelivr.net/npm/cn-fontsource-lxgw-wen-kai-screen@1.0.6/font.css' },
+  { id: 'custom', label: '我的字体', note: '从本机导入', stack: `'${CUSTOM_FONT_NAME}'` }
+];
+const loadedFontCss = new Set();
+let customFontReady = false;
+function ensureFontCss(id) {
+  const f = FONT_PRESETS.find(x => x.id === id);
+  if (!f?.css || loadedFontCss.has(id)) return;
+  loadedFontCss.add(id);
+  const link = document.createElement('link');
+  link.rel = 'stylesheet'; link.href = f.css;
+  document.head.appendChild(link);
+}
+function applyFont(id, persist = true) {
+  const f = FONT_PRESETS.find(x => x.id === id) || FONT_PRESETS[0];
+  if (f.css) ensureFontCss(f.id);
+  const stack = f.stack ? `${f.stack}, Georgia, "Songti SC", serif` : 'Georgia, "Songti SC", serif';
+  document.documentElement.style.setProperty('--reading-font', stack);
+  if (persist) localStorage.setItem(FONT_FAMILY_KEY, f.id);
+  document.querySelectorAll('.font-option').forEach(o => o.classList.toggle('selected', o.dataset.font === f.id));
+}
+async function saveCustomFont(buffer, name) {
+  try { const db = await openReadingDb(); await dbPut(db, FONT_STORE, { id: 'custom', data: buffer, name }); db.close(); } catch (_) {}
+}
+async function restoreCustomFont() {
+  try {
+    const db = await openReadingDb();
+    const rec = await dbGet(db, FONT_STORE, 'custom'); db.close();
+    if (!rec?.data) return;
+    const face = new FontFace(CUSTOM_FONT_NAME, rec.data);
+    await face.load();
+    document.fonts.add(face);
+    customFontReady = true;
+    renderFontOptions();
+    if (localStorage.getItem(FONT_FAMILY_KEY) === 'custom') applyFont('custom');
+  } catch (_) {}
+}
+function renderFontOptions() {
+  const wrap = document.getElementById('fontOptions');
+  if (!wrap) return;
+  wrap.innerHTML = FONT_PRESETS.filter(f => f.id !== 'custom' || customFontReady).map(f => `<button type="button" class="font-option" data-font="${f.id}"${f.stack ? ` style="font-family:${f.stack},Georgia,serif"` : ''}><strong>${escapeHtml(f.label)}</strong><small>${escapeHtml(f.note)}</small></button>`).join('');
+  wrap.querySelectorAll('.font-option').forEach(option => option.addEventListener('click', () => applyFont(option.dataset.font)));
+  const saved = localStorage.getItem(FONT_FAMILY_KEY) || 'default';
+  applyFont(customFontReady ? saved : (saved === 'custom' ? 'default' : saved), false);
+}
+function initFontPicker() {
+  restoreCustomFont();
+  renderFontOptions();
+  document.getElementById('importFont')?.addEventListener('click', () => document.getElementById('fontFileInput').click());
+  document.getElementById('fontFileInput')?.addEventListener('change', async event => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const status = document.getElementById('fontStatus');
+    status.textContent = '正在加载字体…';
+    try {
+      const buffer = await file.arrayBuffer();
+      const face = new FontFace(CUSTOM_FONT_NAME, buffer);
+      await face.load();
+      document.fonts.add(face);
+      customFontReady = true;
+      await saveCustomFont(buffer, file.name);
+      renderFontOptions();
+      applyFont('custom');
+      status.textContent = `已应用字体「${file.name}」，保存在本机，刷新后仍生效。`;
+    } catch (error) { status.textContent = '这个文件不是有效字体，请换 TTF / OTF / WOFF / WOFF2 试试。'; }
+    event.target.value = '';
+  });
+}
 function initSkinPicker() {
   const grid = document.getElementById('skinGrid');
   grid.innerHTML = Object.entries(skinPresets).map(([key, skin]) => `<button type="button" class="skin-option" data-skin="${key}"><span class="skin-swatch" style="--swatch-paper:${skin.paper};--swatch-ink:${skin.ink};--swatch-accent:${skin.accent}"><i></i><b></b></span><span><strong>${skin.label}</strong><small>${skin.note}</small></span></button>`).join('');
@@ -142,14 +216,16 @@ const READING_DB = 'reading-room-db';
 const DOC_STORE = 'documents';   // 旧版单文档
 const LIB_STORE = 'library';     // 书架全文
 const META_STORE = 'meta';       // 书架元信息
+const FONT_STORE = 'fonts';      // 导入的自定义字体
 function openReadingDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(READING_DB, 2);
+    const request = indexedDB.open(READING_DB, 3);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(DOC_STORE)) db.createObjectStore(DOC_STORE);
       if (!db.objectStoreNames.contains(LIB_STORE)) db.createObjectStore(LIB_STORE, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(FONT_STORE)) db.createObjectStore(FONT_STORE, { keyPath: 'id' });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -1330,6 +1406,7 @@ document.getElementById('modeForm').addEventListener('submit', event => {
 document.querySelectorAll('#modeForm [value="cancel"]').forEach(button => button.addEventListener('click', () => { if (typeof modeDialog.close === 'function') modeDialog.close(); else modeDialog.classList.remove('fallback-open'); }));
 
   initSkinPicker();
+  initFontPicker();
   renderShelf();
   renderReadLater();
   updateWeeklyDisplay();
