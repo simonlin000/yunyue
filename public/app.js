@@ -143,8 +143,8 @@ function dbGet(db, store, key) { return new Promise((resolve, reject) => { const
 function dbAll(db, store) { return new Promise((resolve, reject) => { const req = db.transaction(store, 'readonly').objectStore(store).getAll(); req.onsuccess = () => resolve(req.result || []); req.onerror = () => reject(req.error); }); }
 function dbDelete(db, store, key) { return new Promise((resolve, reject) => { const req = db.transaction(store, 'readwrite').objectStore(store).delete(key); req.onsuccess = resolve; req.onerror = () => reject(req.error); }); }
 function genDocId() { return 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
-function kindOfFilename(name) { const lower = String(name || '').toLowerCase(); return /\.pdf$/.test(lower) ? 'pdf' : /\.(docx|doc)$/.test(lower) ? 'doc' : /\.(md|markdown)$/.test(lower) ? 'md' : 'txt'; }
-const kindLabels = { pdf: 'PDF 文件', doc: 'Word 文档', md: 'Markdown', txt: '文本文件', article: '公众号文章', link: '网页文章', file: '已导入文档' };
+function kindOfFilename(name) { const lower = String(name || '').toLowerCase(); return /\.pdf$/.test(lower) ? 'pdf' : /\.(docx|doc)$/.test(lower) ? 'doc' : /\.epub$/.test(lower) ? 'epub' : /\.(md|markdown)$/.test(lower) ? 'md' : 'txt'; }
+const kindLabels = { pdf: 'PDF 文件', doc: 'Word 文档', md: 'Markdown', txt: '文本文件', article: '公众号文章', link: '网页文章', file: '已导入文档', epub: 'EPUB 电子书' };
 // 每篇文档独立进度
 const progKey = id => `reading-room-prog-${id}`;
 function saveDocProgress(id, currentIndex, doneSet) { try { localStorage.setItem(progKey(id), JSON.stringify({ current: currentIndex, done: [...doneSet] })); } catch (_) {} }
@@ -856,11 +856,87 @@ async function parseMarkdownFile(text) {
   }
   return blocks.slice(0, 800);
 }
+async function parseEpubFile(file, onProgress) {
+  setResponse('正在导入', 'EPUB 解析中…');
+  if (!window.JSZip) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+  const zip = await window.JSZip.loadAsync(await file.arrayBuffer());
+  const findFile = pred => Object.keys(zip.files).find(pred);
+  const containerName = findFile(n => /^META-INF\/container\.xml$/i.test(n));
+  if (!containerName) throw new Error('这不是有效的 EPUB（缺少 container.xml）');
+  const container = new DOMParser().parseFromString(await zip.files[containerName].async('string'), 'application/xml');
+  const opfPath = container.querySelector('rootfile')?.getAttribute('full-path');
+  if (!opfPath || !zip.files[opfPath]) throw new Error('EPUB 结构不完整（找不到 OPF 清单）');
+  const opfDir = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/') + 1) : '';
+  const opf = new DOMParser().parseFromString(await zip.files[opfPath].async('string'), 'application/xml');
+  const bookTitle = opf.getElementsByTagName('dc:title')[0]?.textContent?.trim() || '';
+  const resolveHref = href => {
+    const clean = decodeURIComponent(href.split('#')[0]);
+    const parts = (opfDir + clean).split('/');
+    const out = [];
+    for (const p of parts) { if (p === '.' || !p) continue; if (p === '..') out.pop(); else out.push(p); }
+    return out.join('/');
+  };
+  const manifest = {};
+  for (const item of opf.querySelectorAll('manifest > item')) manifest[item.getAttribute('id')] = { href: resolveHref(item.getAttribute('href') || ''), type: item.getAttribute('media-type') || '' };
+  const spineDocs = [];
+  for (const ref of opf.querySelectorAll('spine > itemref')) {
+    const item = manifest[ref.getAttribute('idref')];
+    if (item && /x?html/i.test(item.type) && zip.files[item.href]) spineDocs.push(item.href);
+  }
+  if (!spineDocs.length) throw new Error('EPUB 里没有可读的章节内容');
+  const SKIP_TAGS = 'script,style,noscript,svg,head,link,meta';
+  const MAX_IMAGES = 100;
+  let imageCount = 0;
+  const blocks = [];
+  const pushText = t => { const clean = String(t || '').replace(/\s+/g, ' ').trim(); if (clean && /[0-9A-Za-z\u4e00-\u9fff]/.test(clean)) blocks.push({ type: 'text', text: clean }); };
+  const imgPromises = [];
+  const handleImg = imgEl => {
+    if (imageCount >= MAX_IMAGES) return;
+    const raw = imgEl.getAttribute('src') || imgEl.getAttribute('xlink:href') || '';
+    if (!raw || /^data:/i.test(raw)) return;
+    const entry = zip.files[resolveHref(raw)] || zip.files[Object.keys(zip.files).find(n => n.toLowerCase().endsWith(decodeURIComponent(raw).split('/').pop().toLowerCase()))] ;
+    if (!entry) return;
+    const ext = (raw.split('.').pop() || '').toLowerCase();
+    if (!/^(png|jpe?g|gif|webp|svg)$/.test(ext)) return;
+    imageCount += 1;
+    const idx = blocks.length;
+    blocks.push({ type: 'image', src: '', alt: (imgEl.getAttribute('alt') || '书中插图').slice(0, 120), __pendingIdx: idx });
+    imgPromises.push(entry.async('base64').then(b64 => { const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'jpg' ? 'image/jpeg' : 'image/' + ext; blocks[idx].src = 'data:' + mime + ';base64,' + b64; }).catch(() => { blocks[idx].src = ''; }));
+  };
+  const walk = el => {
+    for (const node of el.children) {
+      const tag = node.tagName.toLowerCase();
+      if (node.matches(SKIP_TAGS)) continue;
+      if (tag === 'img' || tag === 'image') { handleImg(node); continue; }
+      if (tag === 'br') continue;
+      const hasBlockChildren = [...node.children].some(c => /^(p|div|section|article|blockquote|ul|ol|table|h[1-6]|figure|li|img|image)$/i.test(c.tagName));
+      if (tag === 'img' || hasBlockChildren || /^(section|article|div|figure|blockquote|ul|ol|table|tbody|tr|nav|aside|main|body)$/i.test(tag)) { walk(node); continue; }
+      pushText(node.textContent);
+    }
+  };
+  for (let i = 0; i < spineDocs.length; i++) {
+    onProgress?.(Math.round((i / spineDocs.length) * 80), `解析 EPUB · 第 ${i + 1}/${spineDocs.length} 节 · 已提取插图 ${imageCount} 张`);
+    const html = await zip.files[spineDocs[i]].async('string');
+    const dom = new DOMParser().parseFromString(html, 'text/html');
+    const headingEl = dom.querySelector('h1,h2,h3');
+    if (headingEl) { const h = headingEl.textContent.replace(/\s+/g, ' ').trim(); if (h && h.length <= 60 && /[0-9A-Za-z\u4e00-\u9fff]/.test(h)) pushText(h); headingEl.remove(); }
+    walk(dom.body);
+    if (blocks.length >= 800) break;
+  }
+  await Promise.all(imgPromises);
+  const keptImages = blocks.filter(b => b.type === 'image');
+  onProgress?.(90, `压缩插图 ${keptImages.length} 张…`);
+  await Promise.all(keptImages.map(async b => { if (b.src && /^data:image\//.test(b.src)) b.src = await shrinkDataUrl(b.src, 1200); }));
+  const finalBlocks = blocks.filter(b => b.type !== 'image' || b.src).slice(0, 800).map(b => { delete b.__pendingIdx; return b; });
+  if (!finalBlocks.some(b => b.type === 'text')) throw new Error('没能从这本书里提取出文字内容');
+  return { title: bookTitle, blocks: finalBlocks, chapters: spineDocs.length, images: keptImages.length };
+}
 async function parseFileForImport(file, onProgress, signal) {
   const title = (file.name || '').replace(/\.[^.]+$/, '') || '已导入文章';
   const lower = file.name.toLowerCase();
   let blocks; let mdTitle = '';
   if (lower.endsWith('.pdf')) blocks = await parsePdfFile(file, onProgress, signal);
+  else if (/\.epub$/.test(lower)) { const epub = await parseEpubFile(file, onProgress); blocks = epub.blocks; if (epub.title) mdTitle = epub.title; }
   else if (/\.(docx|doc)$/.test(lower)) blocks = await parseDocxFile(file);
   else if (/\.(md|markdown)$/.test(lower)) { const raw = await file.text(); blocks = await parseMarkdownFile(raw); const h1 = raw.match(/^#\s+(\S.*)$/m); if (h1) mdTitle = h1[1].trim().slice(0, 120); }
   else { const bytes = new Uint8Array(await file.arrayBuffer()); let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return { filename: file.name, content: btoa(binary) }; }
