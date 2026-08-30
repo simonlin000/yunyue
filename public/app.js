@@ -257,6 +257,7 @@ function buildChunks(allBlocks) {
   const chunks = [];
   const CHUNK_MAX = 1500;
   let pendingImage = null;
+  let pendingHeads = [];
   let bodyBuf = '';
   const isTocEntry = t => { const s = String(t || '').trim(); return /\.{4,}/.test(s) || (/^[§第部卷篇章ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]/.test(s) && s.length < 40 && /\d+\s*$/.test(s)); };
   const cleanToc = t => t.replace(/\.{4,}/g, ' ').replace(/[ \t]+/g, ' ').trim();
@@ -266,6 +267,7 @@ function buildChunks(allBlocks) {
     if (!clean) return;
     const blocks = [];
     if (pendingImage) { blocks.push(pendingImage); pendingImage = null; }
+    while (pendingHeads.length) blocks.push(pendingHeads.shift());
     blocks.push({ type: 'text', text: clean });
     chunks.push({ blocks, paragraphs: [clean] });
   };
@@ -305,11 +307,13 @@ function buildChunks(allBlocks) {
     }
     flushToc();
     if (/^[”’]\s*\d{1,3}\s*$/.test(text.trim())) continue;
+    if (block.heading) { flushBody(); pendingHeads.push(block); continue; }
     bodyBuf += (bodyBuf ? '\n\n' : '') + text;
     cutBody();
   }
   flushToc();
   flushBody();
+  while (pendingHeads.length) { const h = pendingHeads.shift(); chunks.push({ blocks: [h], paragraphs: [h.text] }); }
   if (pendingImage) chunks.push({ blocks: [pendingImage], paragraphs: [] });
   if (!chunks.length) chunks.push({ blocks: [], paragraphs: [] });
   return chunks;
@@ -357,7 +361,7 @@ function renderRecallNotes() {
 function render() {
   const section = sections[current];
   sectionLabel.textContent = section.label;
-  const contentHtml = section.blocks ? section.blocks.map(block => block.type === 'image' ? `<figure class="article-image"><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '文中配图')}" decoding="async"><figcaption>${escapeHtml(block.alt || '文中配图')}</figcaption></figure>` : String(block.text || '').split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')).join('') : section.paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
+  const contentHtml = section.blocks ? section.blocks.map(block => block.type === 'image' ? `<figure class="article-image"><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '文中配图')}" decoding="async"><figcaption>${escapeHtml(block.alt || '文中配图')}</figcaption></figure>` : block.heading ? `<h4 class="doc-h${block.heading}">${escapeHtml(block.text)}</h4>` : String(block.text || '').split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')).join('') : section.paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
   body.innerHTML = `<h3>${escapeHtml(section.label)}</h3>${contentHtml}${section.quote ? `<div class="pullquote">${escapeHtml(section.quote)}</div>` : ''}`;
   body.querySelectorAll('.article-image img').forEach(img => {
     const src = img.getAttribute('src') || '';
@@ -759,10 +763,16 @@ async function parsePdfFile(file, onProgress, signal) {
       const str = item.str;
       if (!str || !str.trim()) continue;
       const y = item.transform[5];
+      const size = Math.abs(item.transform[3]) || Math.hypot(item.transform[0], item.transform[1]) || 10;
       const last = lines[lines.length - 1];
-      if (last && Math.abs(y - last.y) < 3) last.text += str;
-      else lines.push({ y, text: str });
+      if (last && Math.abs(y - last.y) < 3) { last.text += str; last.size = Math.max(last.size, size); if (item.fontName) last.fontName = item.fontName; }
+      else lines.push({ y, text: str, size, fontName: item.fontName || '' });
     }
+    const lineSizes = lines.map(l => l.size).sort((a, b) => a - b);
+    const bodySize = lineSizes.length ? lineSizes[Math.floor(lineSizes.length / 2)] : 10;
+    const fontCount = {};
+    for (const l of lines) { fontCount[l.fontName] = (fontCount[l.fontName] || 0) + l.text.length; }
+    const bodyFont = Object.entries(fontCount).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
     const gaps = [];
     for (let i = 1; i < lines.length; i++) gaps.push(Math.abs(lines[i].y - lines[i - 1].y));
     gaps.sort((a, b) => a - b);
@@ -774,20 +784,28 @@ async function parsePdfFile(file, onProgress, signal) {
     let paragraph = [];
     const flush = () => {
       if (!paragraph.length) return;
-      let text = '';
-      for (let i = 0; i < paragraph.length; i++) {
-        if (i > 0) {
-          if (isTocLine(paragraph[i - 1]) && isTocLine(paragraph[i])) text += '\n';
-          else if (needSpace(paragraph[i - 1], paragraph[i])) text += ' ';
-        }
-        text += paragraph[i];
-      }
+      const linesInPara = paragraph.slice();
       paragraph = [];
+      let text = '';
+      for (let i = 0; i < linesInPara.length; i++) {
+        if (i > 0) {
+          if (isTocLine(linesInPara[i - 1].text) && isTocLine(linesInPara[i].text)) text += '\n';
+          else if (needSpace(linesInPara[i - 1].text, linesInPara[i].text)) text += ' ';
+        }
+        text += linesInPara[i].text;
+      }
       const cleaned = text.trim();
-      if (cleaned) pageBlocks.push({ type: 'text', text: cleaned });
+      if (!cleaned) return;
+      const headLike = s => s.length <= 60 && !/[。；;，,！””]$/.test(s);
+      const allHead = linesInPara.every(l => l.size >= bodySize * 1.3 || (l.fontName && l.fontName !== bodyFont)) && headLike(cleaned) && cleaned.length >= 2;
+      if (allHead) pageBlocks.push({ type: 'text', text: cleaned, heading: linesInPara[0].size >= bodySize * 1.6 ? 2 : 3 });
+      else pageBlocks.push({ type: 'text', text: cleaned });
     };
     for (let i = 0; i < lines.length; i++) {
-      paragraph.push(lines[i].text);
+      const lineText = lines[i].text.trim();
+      const isHeadLine = lineText.length >= 2 && lineText.length <= 60 && !/[。；;，,！””]$/.test(lineText) && (lines[i].size >= bodySize * 1.3 || (lines[i].fontName && lines[i].fontName !== bodyFont));
+      if (isHeadLine) { flush(); paragraph.push(lines[i]); flush(); continue; }
+      paragraph.push(lines[i]);
       const gap = i + 1 < lines.length ? Math.abs(lines[i + 1].y - lines[i].y) : 0;
       if (gap > paraGap) flush();
     }
@@ -924,7 +942,7 @@ async function parseEpubFile(file, onProgress) {
     const html = await zip.files[spineDocs[i]].async('string');
     const dom = new DOMParser().parseFromString(html, 'text/html');
     const headingEl = dom.querySelector('h1,h2,h3');
-    if (headingEl) { const h = headingEl.textContent.replace(/\s+/g, ' ').trim(); if (h && h.length <= 60 && /[0-9A-Za-z\u4e00-\u9fff]/.test(h)) pushText(h); headingEl.remove(); }
+    if (headingEl) { const h = headingEl.textContent.replace(/\s+/g, ' ').trim(); if (h && h.length <= 60 && /[0-9A-Za-z\u4e00-\u9fff]/.test(h)) blocks.push({ type: 'text', text: h, heading: /^h1$/i.test(headingEl.tagName) ? 2 : 3 }); headingEl.remove(); }
     walk(dom.body);
     if (blocks.length >= 800) break;
   }
