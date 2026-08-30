@@ -1066,13 +1066,29 @@ function renderReadLater() {
   if (!list.length) { container.innerHTML = '<div class="readlater-empty">还没有保存的进度</div>'; return; }
   container.innerHTML = list.map((item, idx) => `<div class="readlater-item"><strong>${escapeHtml(item.title)}</strong><div class="rl-meta"><span>${escapeHtml(item.sectionLabel)} · ${item.progress}%</span><span><button type="button" class="rl-remove" data-idx="${idx}">移除</button> · ${escapeHtml(item.savedAtText)}</span></div></div>`).join('');
   container.querySelectorAll('.readlater-item').forEach((el, idx) => {
-    el.addEventListener('click', event => {
+    el.addEventListener('click', async event => {
       if (event.target.closest('.rl-remove')) { list.splice(idx, 1); setReadLater(list); renderReadLater(); return; }
       const item = list[idx];
+      if (item.docId && item.docId !== activeDocId) {
+        try {
+          const db = await openReadingDb();
+          const doc = await dbGet(db, LIB_STORE, item.docId); db.close();
+          if (!doc?.text) throw new Error('这本书已不在书架上，可能被删除了');
+          restoreDocument(doc);
+        } catch (error) { setResponse('打不开这篇', error.message); return; }
+      } else if (!item.docId) {
+        const metas = await loadShelfMetas();
+        const match = metas.find(m => m.title === item.title);
+        if (match) {
+          const db = await openReadingDb();
+          const doc = await dbGet(db, LIB_STORE, match.id); db.close();
+          if (doc?.text) { item.docId = match.id; setReadLater(list); restoreDocument(doc); }
+        }
+      }
       current = Math.min(item.sectionIndex, sections.length - 1);
       render();
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      setResponse('回到稍后阅读的位置', `已跳转到《${item.title}》· ${item.sectionLabel}。`);
+      setResponse('回到稍后阅读的位置', `《${item.title}》· ${item.sectionLabel}。`);
     });
   });
 }
@@ -1081,6 +1097,7 @@ document.getElementById('saveLater').addEventListener('click', () => {
   const list = getReadLater();
   const item = {
     title: document.getElementById('articleTitle').textContent,
+    docId: activeDocId || undefined,
     sectionLabel: section.label,
     sectionIndex: current,
     progress: Math.round((completed.size / sections.length) * 100),
