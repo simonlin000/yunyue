@@ -900,6 +900,60 @@ async function extractPdfImage(page, name) {
     check();
   }).then(url => url);
 }
+function textBlocksFromOcr(text) {
+  const t = String(text || '').replace(/```[a-z]*\n?/g, '').trim();
+  if (!t) return [];
+  const blocks = [];
+  for (const para of t.split(/\n{2,}/)) {
+    const lines = para.split('\n').map(s => s.trim()).filter(Boolean);
+    for (const line of lines) {
+      const isHead = lines.length === 1 && line.length <= 60 && line.length >= 2 && !/[。；;，,！？””]$/.test(line);
+      blocks.push({ type: 'text', text: line, ...(isHead ? { heading: 3 } : {}) });
+    }
+  }
+  return blocks;
+}
+async function ocrScannedPdf(pdf, pageCount, onProgress, signal) {
+  const throwIfAborted = () => { if (signal?.aborted) throw new DOMException('已取消', 'AbortError'); };
+  const cfg = await api('./api/providers').catch(() => null);
+  throwIfAborted();
+  if (!cfg?.configured) throw new Error(`这是影印版/扫描版 PDF（共 ${pdf.numPages} 页，页面是图片、没有文字层），云阅无法直接提取文字。想直接读影印版：点右上角「模型」设置，配置一个支持看图的多模态模型（如 qwen-vl-plus、glm-4v-flash、gpt-4o），然后重新导入这本书。`);
+  const cap = Math.min(pdf.numPages, 120);
+  const truncated = pdf.numPages > 120;
+  const ok = window.confirm(`检测到影印版/扫描版 PDF（共 ${pdf.numPages} 页，无文字层）。\n\n将用你配置的模型「${cfg.model}」逐页识别文字，每页一次 API 调用、消耗额度。${truncated ? `页数较多，本次只处理前 120 页。` : ''}\n\n开始识别吗？`);
+  if (!ok) throw new DOMException('已取消', 'AbortError');
+  const CONCURRENCY = 2;
+  const results = new Array(cap);
+  let nextPage = 0, donePages = 0;
+  async function ocrPage(p) {
+    throwIfAborted();
+    const page = await pdf.getPage(p);
+    const vp = page.getViewport({ scale: 1 });
+    const scale = Math.min(2, 1600 / vp.width);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width); canvas.height = Math.round(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    const dataUrl = canvas.toDataURL('image/jpeg', .75);
+    page.cleanup?.();
+    const data = await api('./api/ocr', { method: 'POST', body: JSON.stringify({ images: [dataUrl] }) });
+    return textBlocksFromOcr(data.text);
+  }
+  async function worker() {
+    while (nextPage < cap) {
+      throwIfAborted();
+      const p = nextPage++;
+      results[p] = await ocrPage(p + 1);
+      donePages += 1;
+      onProgress?.(Math.round((donePages / cap) * 92), `OCR 识别影印版 · ${donePages}/${cap} 页（走多模态模型）`);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, cap) }, () => worker()));
+  const blocks = [];
+  results.forEach(bs => blocks.push(...bs));
+  if (!blocks.length) throw new Error('OCR 没有识别出文字，请确认模型支持看图，或影印件是否太模糊。');
+  return blocks;
+}
 async function parsePdfFile(file, onProgress, signal) {
   setResponse('正在导入', 'PDF 解析中…');
   const throwIfAborted = () => { if (signal?.aborted) throw new DOMException('已取消', 'AbortError'); };
@@ -1004,8 +1058,8 @@ async function parsePdfFile(file, onProgress, signal) {
   results.forEach(pageBlocks => blocks.push(...pageBlocks));
   const textChars = blocks.filter(b => b.type === 'text').reduce((n, b) => n + (b.text || '').length, 0);
   const imgCount = blocks.filter(b => b.type === 'image').length;
-  if (textChars < 100 && (imgCount >= 3 || pageCount >= 3)) {
-    throw new Error('这是影印版/扫描版 PDF（每页都是图片、没有文字层），云阅目前无法提取其中的文字。请换文字版 PDF，或先用 OCR 工具识别后再导入。');
+  if (textChars < 100 && (imgCount >= 1 || pageCount >= 1)) {
+    return await ocrScannedPdf(pdf, pageCount, onProgress, signal);
   }
   return blocks;
 }
