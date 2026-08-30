@@ -169,12 +169,27 @@ function loadDocProgress(id) { try { return JSON.parse(localStorage.getItem(prog
 function clearDocProgress(id) { try { localStorage.removeItem(progKey(id)); } catch (_) {} }
 let activeDocId = localStorage.getItem('reading-room-active-doc') || '';
 let lastSavedProgress = '';
+// 自动分类：根据标题与正文开头关键词识别分类，不需要用户手选
+function autoClassify(title, text, kind) {
+  const sample = `${title || ''}\n${String(text || '').slice(0, 3000)}`;
+  const rules = [
+    ['神学 · 信仰', /圣经|神学|讲道|讲章|查经|福音|基督|教会|祷告|诗篇|启示录|创世记|使徒行传|保罗|赞美诗|灵修|传道|属灵|团契/],
+    ['AI · 科技', /\bAI\b|人工智能|大模型|LLM|GPT|Claude|Gemini|DeepSeek|OpenAI|智能体|机器学习|深度学习|算法|编程|代码|开源|芯片|机器人|科技|程序员/],
+    ['商业 · 财经', /商业|财经|经济|投资|股票|基金|创业|增长|品牌|营销|跨境|出海|供应链|金融|消费|用户增长/],
+    ['文学 · 经典', /小说|文学|散文|诗集|古文|论语|老子|庄子|孙子兵法|红楼梦|三国|水浒|西游记|诗词|经典/]
+  ];
+  for (const [name, re] of rules) if (re.test(sample)) return name;
+  if (kind === 'epub') return '电子书';
+  if (kind === 'pdf' || kind === 'doc') return '文档';
+  if (kind === 'article' || kind === 'link') return '网络文章';
+  return '未分类';
+}
 async function saveImportedDocument(docData) {
   activeDocId = docData.id;
   localStorage.setItem('reading-room-active-doc', docData.id);
   clearDocProgress(docData.id);
   lastSavedProgress = '';
-  const meta = { id: docData.id, title: docData.title || '已导入文章', source: docData.source || 'file', kind: docData.kind || kindOfFilename(docData.filename), savedAt: docData.savedAt || Date.now(), characters: docData.characters || (docData.text || '').length, images: docData.images || 0, chunkCount: docData.chunkCount || 0, doneCount: 0, serverId: docData.serverId || '', folder: docData.folder || '', cloudOnly: false, bytes: docData.bytes || JSON.stringify(docData).length };
+  const meta = { id: docData.id, title: docData.title || '已导入文章', source: docData.source || 'file', kind: docData.kind || kindOfFilename(docData.filename), savedAt: docData.savedAt || Date.now(), characters: docData.characters || (docData.text || '').length, images: docData.images || 0, chunkCount: docData.chunkCount || 0, doneCount: 0, serverId: docData.serverId || '', folder: docData.folder || autoClassify(docData.title, docData.text, docData.kind || kindOfFilename(docData.filename)), cloudOnly: false, bytes: docData.bytes || JSON.stringify(docData).length };
   try {
     const db = await openReadingDb();
     await dbPut(db, LIB_STORE, docData);
@@ -240,7 +255,7 @@ async function renderShelf() {
     const date = new Date(m.savedAt || Date.now()).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
     const active = m.id === activeDocId;
     const size = m.bytes ? ` · ${(m.bytes / 1024).toFixed(0)}KB` : '';
-    return `<div class="library-item shelf-item${active ? ' active' : ''}" data-id="${m.id}"><div class="item-kicker"><span class="kicker-label">${escapeHtml(kindLabels[m.kind] || '已导入文档')}${m.serverId ? `<i class="shelf-cloud${m.cloudOnly ? ' on' : ''}" data-cloud="${m.id}" title="${m.cloudOnly ? '仅保留云端副本，点此取回本机' : '本机与云端都有副本，点击仅保留云端'}">☁</i>` : ''}</span><button type="button" class="shelf-mini" data-folder-set="${m.id}" title="设置分类">${escapeHtml(m.folder || '分类')}</button><button type="button" class="shelf-remove" data-del="${m.id}" title="从书架移除">×</button></div><strong>${escapeHtml(m.title)}</strong><div class="item-meta"><span>${active ? Math.round((completed.size / sections.length) * 100) + '%' : progress + '%'}</span><span>${escapeHtml(date)}${size}</span></div><div class="progress-track"><span style="width:${progress}%"></span></div></div>`;
+    return `<div class="library-item shelf-item${active ? ' active' : ''}" data-id="${m.id}"><div class="item-kicker"><span class="kicker-label">${escapeHtml(kindLabels[m.kind] || '已导入文档')}${m.serverId ? `<i class="shelf-cloud${m.cloudOnly ? ' on' : ''}" data-cloud="${m.id}" title="${m.cloudOnly ? '仅保留云端副本，点此取回本机' : '本机与云端都有副本，点击仅保留云端'}">☁</i>` : ''}</span><button type="button" class="shelf-remove" data-del="${m.id}" title="从书架移除">×</button></div><strong>${escapeHtml(m.title)}</strong><div class="item-meta"><span>${active ? Math.round((completed.size / sections.length) * 100) + '%' : progress + '%'}</span><span>${escapeHtml(date)}${size}</span></div><div class="progress-track"><span style="width:${progress}%"></span></div></div>`;
   };
   let html = metas.length ? folderNames.map(name => {
     const list = groups.get(name);
@@ -261,7 +276,7 @@ async function renderShelf() {
     const cloud = event.target.closest('[data-cloud]');
     if (cloud) { event.stopPropagation(); toggleCloudOnly(cloud.dataset.cloud); return; }
     const fold = event.target.closest('[data-folder-set]');
-    if (fold) { event.stopPropagation(); openFolderDialog(fold.dataset.folderSet); return; }
+    if (fold) { event.stopPropagation(); return; }
     openShelfDoc(item.dataset.id);
   }));
 }
@@ -290,19 +305,6 @@ async function toggleCloudOnly(id) {
   } catch (error) { setResponse('云端副本操作失败', error.message); }
   renderShelf();
 }
-let folderTargetId = '';
-async function openFolderDialog(id) {
-  folderTargetId = id;
-  const metas = await loadShelfMetas();
-  const meta = metas.find(m => m.id === id);
-  const names = [...new Set(metas.map(m => m.folder).filter(Boolean))];
-  const input = document.getElementById('folderName');
-  const list = document.getElementById('folderOptions');
-  if (input) input.value = meta?.folder || '';
-  if (list) list.innerHTML = names.map(n => `<option value="${escapeHtml(n)}">`).join('');
-  const dlg = document.getElementById('folderDialog');
-  if (dlg) { if (typeof dlg.showModal === 'function') dlg.showModal(); else { dlg.classList.add('fallback-open'); dlg.setAttribute('open', ''); } }
-}
 let shelfDeleteArmed = '';
 async function handleShelfDelete(id, btn) {
   if (shelfDeleteArmed !== id) {
@@ -318,6 +320,7 @@ async function handleShelfDelete(id, btn) {
   renderShelf();
   setResponse('已从书架移除', '文章已删除，重新导入即可找回。');
 }
+
 async function openShelfDoc(id) {
   try {
     const db = await openReadingDb();
@@ -1113,11 +1116,10 @@ document.getElementById('fileInput').addEventListener('change', async e => {
 });
 
 // 书架弹窗与链接导入
-function openLinkDialog() { document.getElementById('linkStatus').textContent = ''; document.getElementById('linkUrl').value = ''; const lf = document.getElementById('linkFolder'); if (lf) lf.value = ''; if (typeof linkDialog.showModal === 'function') linkDialog.showModal(); else { linkDialog.classList.add('fallback-open'); linkDialog.setAttribute('open', ''); } }
+function openLinkDialog() { document.getElementById('linkStatus').textContent = ''; document.getElementById('linkUrl').value = ''; if (typeof linkDialog.showModal === 'function') linkDialog.showModal(); else { linkDialog.classList.add('fallback-open'); linkDialog.setAttribute('open', ''); } }
 const importLinkBtnEl = document.getElementById('importLinkBtn');
 if (importLinkBtnEl) importLinkBtnEl.addEventListener('click', openLinkDialog);
 document.getElementById('menuShelf').addEventListener('click', () => { openMenu(false); renderShelf(); if (typeof shelfDialog.showModal === 'function') shelfDialog.showModal(); else { shelfDialog.classList.add('fallback-open'); shelfDialog.setAttribute('open', ''); } });
-document.getElementById('menuLink').addEventListener('click', () => { openMenu(false); openLinkDialog(); });
 document.querySelectorAll('#linkForm [value="cancel"]').forEach(button => button.addEventListener('click', () => linkDialog.close ? linkDialog.close() : linkDialog.classList.remove('fallback-open')));
 document.getElementById('linkForm').addEventListener('submit', async event => {
   event.preventDefault();
@@ -1130,7 +1132,7 @@ document.getElementById('linkForm').addEventListener('submit', async event => {
   try {
     const data = await api('./api/fetch-article', { method: 'POST', body: JSON.stringify({ url }) });
     linkStatus.textContent = `已抓到《${data.title}》，正在放入书架…`;
-    const imp = await api('./api/import', { method: 'POST', body: JSON.stringify({ filename: `${data.title}.html`, title: data.title, blocks: data.blocks, doc_id: genDocId(), folder: (document.getElementById('linkFolder')?.value || '').trim().slice(0, 20) }) });
+    const imp = await api('./api/import', { method: 'POST', body: JSON.stringify({ filename: `${data.title}.html`, title: data.title, blocks: data.blocks, doc_id: genDocId() }) });
     const id = imp.serverId || genDocId();
     const doc = { ...imp, id, title: imp.title || data.title, savedAt: Date.now(), source: 'link', kind: 'article', serverId: imp.serverId, folder: (document.getElementById('linkFolder')?.value || '').trim().slice(0, 20) };
     await saveImportedDocument(doc);
@@ -1176,8 +1178,6 @@ menuToggle.addEventListener('click', () => openMenu(!mobileMenu.classList.contai
 document.getElementById('menuClose').addEventListener('click', () => openMenu(false));
 document.getElementById('menuSkin').addEventListener('click', () => { openMenu(false); document.getElementById('skinSettings').click(); });
 document.getElementById('menuModel').addEventListener('click', () => { openMenu(false); document.getElementById('modelSettings').click(); });
-document.getElementById('menuImport').addEventListener('click', () => { openMenu(false); pickFiles(false); });
-document.getElementById('menuBatch')?.addEventListener('click', () => { openMenu(false); pickFiles(true); });
 document.addEventListener('pointerdown', event => { if (mobileMenu.classList.contains('open') && !mobileMenu.contains(event.target) && !menuToggle.contains(event.target)) openMenu(false); });
 
 // 稍后阅读
@@ -1236,33 +1236,29 @@ document.getElementById('saveLater').addEventListener('click', () => {
 });
 document.getElementById('newArticle').addEventListener('click', () => document.getElementById('fileInput').click());
 
-// 导入二级菜单（文件 / 批量 / 链接）与分类弹窗
+// 侧栏导入菜单（桌面折叠）与移动端导入子菜单
 function pickFiles(multiple) {
   const input = document.getElementById('fileInput');
   if (multiple) input.setAttribute('multiple', ''); else input.removeAttribute('multiple');
   input.click();
 }
-const importMenuPanel = document.getElementById('importMenuPanel');
-if (importMenuPanel) {
-  document.getElementById('importMenuBtn').addEventListener('click', event => { event.stopPropagation(); importMenuPanel.hidden = !importMenuPanel.hidden; });
-  document.addEventListener('pointerdown', event => { if (!event.target.closest('#importDropdown')) importMenuPanel.hidden = true; });
-  importMenuPanel.addEventListener('click', event => {
+const importNavSub = document.getElementById('importNavSub');
+if (importNavSub) {
+  const navToggle = document.getElementById('importNavToggle');
+  navToggle.addEventListener('click', () => { importNavSub.hidden = !importNavSub.hidden; navToggle.setAttribute('aria-expanded', String(!importNavSub.hidden)); });
+  importNavSub.addEventListener('click', event => {
     const btn = event.target.closest('[data-imp]'); if (!btn) return;
-    importMenuPanel.hidden = true;
     if (btn.dataset.imp === 'file') pickFiles(false);
     else if (btn.dataset.imp === 'batch') pickFiles(true);
     else openLinkDialog();
   });
 }
-const folderDialog = document.getElementById('folderDialog');
-if (folderDialog) {
-  document.querySelectorAll('#folderDialog [value="cancel"]').forEach(button => button.addEventListener('click', () => folderDialog.close ? folderDialog.close() : folderDialog.classList.remove('fallback-open')));
-  document.getElementById('saveFolder').addEventListener('click', event => {
-    event.preventDefault();
-    const val = (document.getElementById('folderName').value || '').trim().slice(0, 20);
-    if (folderTargetId) updateDocMeta(folderTargetId, { folder: val }).then(renderShelf);
-    if (typeof folderDialog.close === 'function') folderDialog.close(); else folderDialog.classList.remove('fallback-open');
-  });
+const mobileImportSub = document.getElementById('mobileImportSub');
+if (mobileImportSub) {
+  document.getElementById('menuImportToggle').addEventListener('click', () => { mobileImportSub.hidden = !mobileImportSub.hidden; document.getElementById('menuImportToggle').setAttribute('aria-expanded', String(!mobileImportSub.hidden)); });
+  document.getElementById('menuImportFile').addEventListener('click', () => { openMenu(false); pickFiles(false); });
+  document.getElementById('menuImportBatch').addEventListener('click', () => { openMenu(false); pickFiles(true); });
+  document.getElementById('menuImportLink').addEventListener('click', () => { openMenu(false); openLinkDialog(); });
 }
 
 // 本周阅读时长
