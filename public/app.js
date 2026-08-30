@@ -352,8 +352,17 @@ function renderRecallNotes() {
 function render() {
   const section = sections[current];
   sectionLabel.textContent = section.label;
-  const contentHtml = section.blocks ? section.blocks.map(block => block.type === 'image' ? `<figure class="article-image"><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '文中配图')}" loading="lazy"><figcaption>${escapeHtml(block.alt || '文中配图')}</figcaption></figure>` : String(block.text || '').split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')).join('') : section.paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
+  const contentHtml = section.blocks ? section.blocks.map(block => block.type === 'image' ? `<figure class="article-image"><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '文中配图')}" decoding="async"><figcaption>${escapeHtml(block.alt || '文中配图')}</figcaption></figure>` : String(block.text || '').split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')).join('') : section.paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
   body.innerHTML = `<h3>${escapeHtml(section.label)}</h3>${contentHtml}${section.quote ? `<div class="pullquote">${escapeHtml(section.quote)}</div>` : ''}`;
+  body.querySelectorAll('.article-image img').forEach(img => img.addEventListener('error', () => {
+    if (img.dataset.retried) { img.closest('.article-image').classList.add('img-failed'); return; }
+    img.dataset.retried = '1';
+    const u = img.getAttribute('src') || '';
+    img.src = /^https?:/i.test(u) ? `./api/image-proxy?u=${encodeURIComponent(u)}&sid=${sessionId}` : u + (u.includes('?') ? '&' : '?') + 'r=1';
+  }));
+  const isMobileViewport = window.matchMedia('(max-width: 700px)').matches;
+  if (isMobileViewport) window.scrollTo({ top: 0, behavior: 'auto' });
+  else body.scrollTop = 0;
   const progress = Math.round((completed.size / sections.length) * 100);
   footerProgress.textContent = completed.has(current) ? `这一块已读完 · 总进度 ${progress}%` : `读到 ${progress}%`;
   readState.textContent = completed.size === 0 ? '刚开始' : completed.size === sections.length ? '已读完' : `已读 ${completed.size} 块`;
@@ -510,6 +519,43 @@ function updateSelectionAsk() {
 
 body.addEventListener('pointerup', () => setTimeout(updateSelectionAsk, 0));
 body.addEventListener('keyup', updateSelectionAsk);
+
+// 手机端：长按整段选中（原生划词已在跑就不抢）
+let lpTimer = null, lpPoint = null, lpTarget = null;
+body.addEventListener('touchstart', event => {
+  if (event.touches.length !== 1) return;
+  const target = event.target.closest('p, .pullquote, .article-image figcaption');
+  if (!target) return;
+  lpPoint = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+  lpTarget = target;
+  lpTimer = setTimeout(() => {
+    lpTimer = null;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const range = document.createRange();
+    range.selectNodeContents(lpTarget);
+    sel.removeAllRanges(); sel.addRange(range);
+    updateSelectionAsk();
+  }, 450);
+}, { passive: true });
+body.addEventListener('touchmove', event => {
+  if (!lpTimer || !lpPoint) return;
+  const t = event.touches[0];
+  if (Math.abs(t.clientX - lpPoint.x) > 12 || Math.abs(t.clientY - lpPoint.y) > 12) { clearTimeout(lpTimer); lpTimer = null; }
+}, { passive: true });
+['touchend', 'touchcancel'].forEach(type => body.addEventListener(type, () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }, { passive: true }));
+
+// 手机原生划词也能唤起提问条（iOS 划词结束不一定触发 pointerup）
+let scTimer = null;
+document.addEventListener('selectionchange', () => {
+  clearTimeout(scTimer);
+  scTimer = setTimeout(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) { if (!selectionAsk.hidden) hideSelectionAsk(); return; }
+    if (!body.contains(sel.anchorNode) || !body.contains(sel.focusNode)) return;
+    updateSelectionAsk();
+  }, 200);
+});
 document.addEventListener('pointerdown', event => { if (!selectionAsk.contains(event.target) && !body.contains(event.target)) hideSelectionAsk(); });
 document.getElementById('askSelection').addEventListener('click', submitSelectionQuestion);
 selectionQuestion.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); submitSelectionQuestion(); } });
