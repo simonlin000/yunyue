@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>云阅</title>
-  <link rel="stylesheet" href="styles.css?v=35">
+  <link rel="stylesheet" href="styles.css?v=36">
 </head>
 <body>
   <main class="app-shell">
@@ -14,8 +14,14 @@
         <button class="icon-button" id="focusMode" title="深色模式" aria-label="切换深色模式">◐</button>
         <button class="ghost-button top-ghost" id="skinSettings" title="更换云阅皮肤">皮肤</button>
         <button class="ghost-button top-ghost" id="modelSettings" title="配置伴读模型">模型设置</button>
-        <button class="ghost-button top-ghost" id="importLinkBtn" title="导入公众号文章链接">导入链接</button>
-        <button class="ghost-button top-ghost" id="importArticle">导入文件</button>
+        <div class="import-dropdown" id="importDropdown">
+          <button class="ghost-button top-ghost" id="importMenuBtn" title="导入">导入 ▾</button>
+          <div class="import-menu" id="importMenuPanel" hidden>
+            <button type="button" data-imp="file">导入文件</button>
+            <button type="button" data-imp="batch">批量导入</button>
+            <button type="button" data-imp="link">导入链接</button>
+          </div>
+        </div>
         <button class="icon-button menu-toggle" id="menuToggle" aria-label="更多操作" aria-expanded="false">⋯</button>
         <input type="file" id="fileInput" accept=".md,.txt,.markdown,.pdf,.docx,.doc,.epub" hidden>
       </div>
@@ -27,6 +33,7 @@
       <button type="button" class="mobile-menu-item" id="menuShelf">书架</button>
       <button type="button" class="mobile-menu-item" id="menuLink">导入文章链接</button>
       <button type="button" class="mobile-menu-item" id="menuImport">导入文件</button>
+      <button type="button" class="mobile-menu-item" id="menuBatch">批量导入</button>
     </div>
     <div class="import-progress" id="importProgress" hidden><div class="import-progress-track"><span id="importProgressBar"></span></div><span class="import-progress-text" id="importProgressText"></span><button type="button" class="import-cancel" id="importCancel">取消</button></div>
 
@@ -124,14 +131,23 @@
       <div id="shelfDialogList"></div>
     </div>
   </dialog>
+  <dialog class="settings-dialog" id="folderDialog">
+    <form method="dialog" class="settings-form">
+      <div class="dialog-head"><div><div class="eyebrow">书架</div><h2>设置分类</h2></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+      <p class="dialog-note">书架会按分类分组显示。留空表示不分类。</p>
+      <label>分类名称<input id="folderName" list="folderOptions" type="text" placeholder="输入分类名" maxlength="20"><datalist id="folderOptions"></datalist></label>
+      <div class="dialog-actions"><button class="ghost-button" value="cancel">取消</button><button class="primary-button" id="saveFolder" value="default">保存</button></div>
+    </form>
+  </dialog>
   <dialog class="settings-dialog link-dialog" id="linkDialog">
     <form method="dialog" class="settings-form" id="linkForm">
       <div class="dialog-head"><div><div class="eyebrow">云阅导入</div><h2>导入文章链接</h2></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
       <p class="dialog-note">粘贴公众号文章链接，云阅抓取正文和配图后放进书架。其他网页也可以试试。</p>
       <label>文章链接<input id="linkUrl" type="url" placeholder="https://mp.weixin.qq.com/s/..." inputmode="url"></label>
+      <label>分类（可选）<input id="linkFolder" type="text" placeholder="例如：神学 / AI 动向" maxlength="20"></label>
       <div class="dialog-actions"><button class="ghost-button" value="cancel">取消</button><button class="primary-button" id="importLink" value="default">抓取导入</button></div>
       <p class="dialog-status" id="linkStatus" role="status"></p>
     </form>
   </dialog>
   </main>
-  <script src="app.js?v=50"></script>
+  <script src="app.js?v=51"></script>

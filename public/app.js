@@ -88,7 +88,19 @@ function getSessionId() {
   return sessionId;
 }
 const sessionId = getSessionId();
-const apiHeaders = {'Content-Type': 'application/json', 'X-Reading-Room-Session': sessionId};
+const DOC_SECRET_KEY = 'reading-room-doc-secret';
+function getDocSecret() {
+  let s = localStorage.getItem(DOC_SECRET_KEY);
+  if (!s || !/^[a-f0-9]{32,128}$/.test(s)) {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    s = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem(DOC_SECRET_KEY, s);
+  }
+  return s;
+}
+const docSecret = getDocSecret();
+const apiHeaders = {'Content-Type': 'application/json', 'X-Reading-Room-Session': sessionId, 'X-Doc-Secret': docSecret};
 const providerInfo = {
   volcengine: '火山引擎使用 Endpoint ID 作为模型名',
   deepseek: '默认使用 deepseek-chat',
@@ -162,7 +174,7 @@ async function saveImportedDocument(docData) {
   localStorage.setItem('reading-room-active-doc', docData.id);
   clearDocProgress(docData.id);
   lastSavedProgress = '';
-  const meta = { id: docData.id, title: docData.title || '已导入文章', source: docData.source || 'file', kind: docData.kind || kindOfFilename(docData.filename), savedAt: docData.savedAt || Date.now(), characters: docData.characters || (docData.text || '').length, images: docData.images || 0, chunkCount: docData.chunkCount || 0, doneCount: 0 };
+  const meta = { id: docData.id, title: docData.title || '已导入文章', source: docData.source || 'file', kind: docData.kind || kindOfFilename(docData.filename), savedAt: docData.savedAt || Date.now(), characters: docData.characters || (docData.text || '').length, images: docData.images || 0, chunkCount: docData.chunkCount || 0, doneCount: 0, serverId: docData.serverId || '', folder: docData.folder || '', cloudOnly: false, bytes: docData.bytes || JSON.stringify(docData).length };
   try {
     const db = await openReadingDb();
     await dbPut(db, LIB_STORE, docData);
@@ -200,8 +212,10 @@ async function updateDocMeta(id, patch) {
 }
 async function deleteShelfDoc(id) {
   const wasActive = activeDocId === id;
-  try { const db = await openReadingDb(); await dbDelete(db, LIB_STORE, id); await dbDelete(db, META_STORE, id); db.close(); } catch (_) {}
+  let serverId = '';
+  try { const db = await openReadingDb(); const meta = await dbGet(db, META_STORE, id); if (meta?.serverId) serverId = meta.serverId; await dbDelete(db, LIB_STORE, id); await dbDelete(db, META_STORE, id); db.close(); } catch (_) {}
   clearDocProgress(id);
+  if (serverId) api('./api/doc-delete', { method: 'POST', body: JSON.stringify({ did: serverId }) }).catch(() => {});
   if (wasActive) {
     activeDocId = ''; localStorage.removeItem('reading-room-active-doc');
     api('./api/document-delete', { method: 'POST' }).catch(() => {});
@@ -215,18 +229,79 @@ async function renderShelf() {
   const metas = await loadShelfMetas();
   if (seq !== shelfRenderSeq) return;
   metas.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
-  const html = metas.length ? metas.map(m => {
+  const groups = new Map();
+  for (const m of metas) { const k = m.folder || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); }
+  const folderNames = [...groups.keys()].sort((a, b) => (!a ? 1 : !b ? -1 : a.localeCompare(b, 'zh')));
+  let collapsed = []; try { collapsed = JSON.parse(localStorage.getItem('reading-room-shelf-folders') || '[]'); } catch (_) {}
+  const collapsedSet = new Set(collapsed);
+  const emptyTip = '<div class="readlater-empty">书架还是空的。点右上角「导入」选一种导入方式。</div>';
+  const itemHtml = m => {
     const progress = m.chunkCount ? Math.min(100, Math.round((m.doneCount || 0) / m.chunkCount * 100)) : 0;
     const date = new Date(m.savedAt || Date.now()).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
     const active = m.id === activeDocId;
-    return `<div class="library-item shelf-item${active ? ' active' : ''}" data-id="${m.id}"><div class="item-kicker"><span>${escapeHtml(kindLabels[m.kind] || '已导入文档')}</span><button type="button" class="shelf-remove" data-del="${m.id}" title="从书架移除">×</button></div><strong>${escapeHtml(m.title)}</strong><div class="item-meta"><span>${active ? Math.round((completed.size / sections.length) * 100) + '%' : progress + '%'}</span><span>${escapeHtml(date)}</span></div><div class="progress-track"><span style="width:${progress}%"></span></div></div>`;
-  }).join('') : '<div class="readlater-empty">书架还是空的。点右上角「导入文件」，或「导入链接」贴一篇公众号文章。</div>';
+    const size = m.bytes ? ` · ${(m.bytes / 1024).toFixed(0)}KB` : '';
+    return `<div class="library-item shelf-item${active ? ' active' : ''}" data-id="${m.id}"><div class="item-kicker"><span class="kicker-label">${escapeHtml(kindLabels[m.kind] || '已导入文档')}${m.serverId ? `<i class="shelf-cloud${m.cloudOnly ? ' on' : ''}" data-cloud="${m.id}" title="${m.cloudOnly ? '仅保留云端副本，点此取回本机' : '本机与云端都有副本，点击仅保留云端'}">☁</i>` : ''}</span><button type="button" class="shelf-mini" data-folder-set="${m.id}" title="设置分类">${escapeHtml(m.folder || '分类')}</button><button type="button" class="shelf-remove" data-del="${m.id}" title="从书架移除">×</button></div><strong>${escapeHtml(m.title)}</strong><div class="item-meta"><span>${active ? Math.round((completed.size / sections.length) * 100) + '%' : progress + '%'}</span><span>${escapeHtml(date)}${size}</span></div><div class="progress-track"><span style="width:${progress}%"></span></div></div>`;
+  };
+  let html = metas.length ? folderNames.map(name => {
+    const list = groups.get(name);
+    const isCol = collapsedSet.has(name);
+    return `<div class="shelf-folder${isCol ? ' collapsed' : ''}" data-folder="${escapeHtml(name)}"><button type="button" class="shelf-folder-head" data-fold="${escapeHtml(name)}"><span>${escapeHtml(name || '未分类')}</span><span class="shelf-folder-count">${list.length}</span><span class="toc-caret" aria-hidden="true">▾</span></button>${isCol ? '' : list.map(itemHtml).join('')}</div>`;
+  }).join('') : emptyTip;
   ['shelfList', 'shelfDialogList'].forEach(elId => { const el = document.getElementById(elId); if (el) el.innerHTML = html; });
+  document.querySelectorAll('.shelf-folder-head').forEach(head => head.addEventListener('click', () => {
+    const name = head.dataset.fold;
+    const set = new Set(collapsed);
+    if (set.has(name)) set.delete(name); else set.add(name);
+    localStorage.setItem('reading-room-shelf-folders', JSON.stringify([...set]));
+    renderShelf();
+  }));
   document.querySelectorAll('.shelf-item').forEach(item => item.addEventListener('click', event => {
     const del = event.target.closest('[data-del]');
     if (del) { event.stopPropagation(); handleShelfDelete(del.dataset.del, del); return; }
+    const cloud = event.target.closest('[data-cloud]');
+    if (cloud) { event.stopPropagation(); toggleCloudOnly(cloud.dataset.cloud); return; }
+    const fold = event.target.closest('[data-folder-set]');
+    if (fold) { event.stopPropagation(); openFolderDialog(fold.dataset.folderSet); return; }
     openShelfDoc(item.dataset.id);
   }));
+}
+async function toggleCloudOnly(id) {
+  try {
+    const db = await openReadingDb();
+    const meta = await dbGet(db, META_STORE, id);
+    if (!meta?.serverId) { db.close(); return; }
+    if (!meta.cloudOnly) {
+      await dbDelete(db, LIB_STORE, id);
+      meta.cloudOnly = true;
+      await dbPut(db, META_STORE, meta);
+      db.close();
+      setResponse('已切换为仅云端', `《${meta.title}》本机副本已清除，打开时从服务端拉取。`);
+    } else {
+      db.close();
+      const remote = await api('./api/doc-load?did=' + encodeURIComponent(meta.serverId));
+      if (!remote.document) throw new Error('服务端副本已不存在');
+      const db2 = await openReadingDb();
+      await dbPut(db2, LIB_STORE, { ...remote.document, id, serverId: meta.serverId });
+      meta.cloudOnly = false;
+      await dbPut(db2, META_STORE, meta);
+      db2.close();
+      setResponse('已取回本机', `《${meta.title}》已从服务端恢复本地副本。`);
+    }
+  } catch (error) { setResponse('云端副本操作失败', error.message); }
+  renderShelf();
+}
+let folderTargetId = '';
+async function openFolderDialog(id) {
+  folderTargetId = id;
+  const metas = await loadShelfMetas();
+  const meta = metas.find(m => m.id === id);
+  const names = [...new Set(metas.map(m => m.folder).filter(Boolean))];
+  const input = document.getElementById('folderName');
+  const list = document.getElementById('folderOptions');
+  if (input) input.value = meta?.folder || '';
+  if (list) list.innerHTML = names.map(n => `<option value="${escapeHtml(n)}">`).join('');
+  const dlg = document.getElementById('folderDialog');
+  if (dlg) { if (typeof dlg.showModal === 'function') dlg.showModal(); else { dlg.classList.add('fallback-open'); dlg.setAttribute('open', ''); } }
 }
 let shelfDeleteArmed = '';
 async function handleShelfDelete(id, btn) {
@@ -246,8 +321,15 @@ async function handleShelfDelete(id, btn) {
 async function openShelfDoc(id) {
   try {
     const db = await openReadingDb();
-    const doc = await dbGet(db, LIB_STORE, id); db.close();
-    if (!doc?.text) throw new Error('文章内容已不存在，请重新导入');
+    let doc = await dbGet(db, LIB_STORE, id); db.close();
+    if (!doc?.text) {
+      const meta = (await loadShelfMetas()).find(m => m.id === id);
+      if (meta?.serverId) {
+        const remote = await api('./api/doc-load?did=' + encodeURIComponent(meta.serverId));
+        if (remote.document) doc = { ...remote.document, id, serverId: meta.serverId };
+      }
+    }
+    if (!doc?.text) throw new Error('本机与云端都没有内容，请重新导入');
     closeShelfDialog();
     restoreDocument(doc);
     setResponse('已打开', `《${doc.title}》· 进度已恢复。`);
@@ -425,7 +507,7 @@ async function hydrateImage(img, src, viaProxy = false) {
     if (!/^image\//i.test(blob.type)) throw new Error('返回内容不是图片');
     img.src = URL.createObjectURL(blob);
   } catch (err) {
-    if (!viaProxy && /^https?:/i.test(src)) return hydrateImage(img, `./api/image-proxy?u=${encodeURIComponent(src)}&sid=${sessionId}`, true);
+    if (!viaProxy && /^https?:/i.test(src)) return hydrateImage(img, `./api/image-proxy?u=${encodeURIComponent(src)}&sid=${sessionId}&k=${docSecret}`, true);
     if (!viaProxy && img.dataset.retried !== '1') { img.dataset.retried = '1'; return hydrateImage(img, src + (src.includes('?') ? '&' : '?') + 'r=1'); }
     fig().classList.add('img-failed');
     const cap = fig().querySelector('figcaption');
@@ -696,7 +778,8 @@ document.getElementById('focusMode').addEventListener('click', () => {
   if (isDark) applySkin(chosenSkin.name, chosenSkin.custom, true);
   else applySkin('ink', null, false);
 });
-document.getElementById('importArticle').addEventListener('click', () => document.getElementById('fileInput').click());
+const importArticleBtn = document.getElementById('importArticle');
+if (importArticleBtn) importArticleBtn.addEventListener('click', () => document.getElementById('fileInput').click());
 let pdfjsPromise = null;
 function loadPdfJs() { const v = '4.6.82'; return (pdfjsPromise ||= import(`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${v}/pdf.min.mjs`).then(m => { m.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${v}/pdf.worker.min.mjs`; return m; })); }
 function loadScript(src) { return new Promise((resolve, reject) => { const s = document.createElement('script'); s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('解析组件加载失败，请检查网络后重试')); document.head.appendChild(s); }); }
@@ -973,6 +1056,7 @@ function apiUpload(path, body, onPercent, signal) {
     xhr.open('POST', path);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.setRequestHeader('X-Reading-Room-Session', getSessionId());
+    xhr.setRequestHeader('X-Doc-Secret', getDocSecret());
     if (signal) signal.addEventListener('abort', () => xhr.abort());
     xhr.upload.onprogress = e => { if (e.lengthComputable && onPercent) onPercent(Math.round((e.loaded / e.total) * 100)); };
     xhr.onload = () => { let data = {}; try { data = JSON.parse(xhr.responseText); } catch (_) {} if (xhr.status >= 200 && xhr.status < 300) resolve(data); else reject(new Error(data.error || '上传失败')); };
@@ -982,8 +1066,9 @@ function apiUpload(path, body, onPercent, signal) {
   });
 }
 let importAbort = null;
-document.getElementById('fileInput').addEventListener('change', async e => {
-  const file = e.target.files[0]; if (!file) return;
+async function importFiles(files) {
+  const list = [...files];
+  if (!list.length) return;
   const progressBox = document.getElementById('importProgress');
   const progressBar = document.getElementById('importProgressBar');
   const progressText = document.getElementById('importProgressText');
@@ -992,30 +1077,45 @@ document.getElementById('fileInput').addEventListener('change', async e => {
   importAbort = new AbortController();
   cancelButton.hidden = false;
   cancelButton.onclick = () => importAbort.abort();
+  const tag = i => list.length > 1 ? `(${i + 1}/${list.length}) ` : '';
   try {
     progressBox.hidden = false; showProgress(2, '读取文件…');
-    const payload = await parseFileForImport(file, showProgress, importAbort.signal);
-    showProgress(92, '上传到服务端…');
-    const data = await apiUpload('./api/import', JSON.stringify(payload), pct => showProgress(92 + Math.round(pct * 0.08), `上传中 · ${pct}%`), importAbort.signal);
-    showProgress(100, '导入完成');
-    const title = data.title;
-    const id = genDocId();
-    const doc = { ...data, id, title, savedAt: Date.now(), source: 'file', kind: kindOfFilename(file.name) };
-    await saveImportedDocument(doc);
-    if (restoreDocument(doc)) setResponse('文件已导入', `${title} · 已提取 ${data.characters} 个字符${data.images ? `、${data.images} 张配图` : ''}，已放入书架。`);
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      const payload = await parseFileForImport(file, (pct, text) => showProgress(pct / list.length * 92 + (i / list.length) * 92, `${tag(i)}${text}`), importAbort.signal);
+      payload.doc_id = genDocId();
+      showProgress(92 + (i / list.length) * 8, `${tag(i)}上传到服务端…`);
+      const data = await apiUpload('./api/import', JSON.stringify(payload), pct => showProgress(92 + ((i + pct / 100) / list.length) * 8, `${tag(i)}上传中 · ${Math.round(pct)}%`), importAbort.signal);
+      const title = data.title;
+      const id = payload.doc_id;
+      const doc = { ...data, id, title, savedAt: Date.now(), source: 'file', kind: kindOfFilename(file.name), serverId: data.serverId };
+      await saveImportedDocument(doc);
+      if (i === list.length - 1) {
+        showProgress(100, '导入完成');
+        if (restoreDocument(doc)) setResponse('导入完成', list.length > 1 ? `共导入 ${list.length} 个文件，当前显示《${title}》。` : `${title} · 已提取 ${data.characters} 个字符${data.images ? `、${data.images} 张配图` : ''}，已放入书架。`);
+      } else {
+        setResponse('批量导入中', `已完成 ${i + 1}/${list.length}：《${title}》`);
+      }
+    }
     setTimeout(() => { progressBox.hidden = true; }, 900);
   } catch (error) {
     progressBox.hidden = true;
-    if (error?.name === 'AbortError') setResponse('已取消导入', '导入已中止，没有写入任何内容。');
+    if (error?.name === 'AbortError') setResponse('已取消导入', '导入已中止，之前完成的文件仍在书架里。');
     else setResponse('导入失败', error.message);
   }
   cancelButton.hidden = true;
+}
+document.getElementById('fileInput').addEventListener('change', async e => {
+  const files = e.target.files;
+  if (!files?.length) return;
+  await importFiles(files);
   e.target.value = '';
 });
 
 // 书架弹窗与链接导入
-function openLinkDialog() { document.getElementById('linkStatus').textContent = ''; document.getElementById('linkUrl').value = ''; if (typeof linkDialog.showModal === 'function') linkDialog.showModal(); else { linkDialog.classList.add('fallback-open'); linkDialog.setAttribute('open', ''); } }
-document.getElementById('importLinkBtn').addEventListener('click', openLinkDialog);
+function openLinkDialog() { document.getElementById('linkStatus').textContent = ''; document.getElementById('linkUrl').value = ''; const lf = document.getElementById('linkFolder'); if (lf) lf.value = ''; if (typeof linkDialog.showModal === 'function') linkDialog.showModal(); else { linkDialog.classList.add('fallback-open'); linkDialog.setAttribute('open', ''); } }
+const importLinkBtnEl = document.getElementById('importLinkBtn');
+if (importLinkBtnEl) importLinkBtnEl.addEventListener('click', openLinkDialog);
 document.getElementById('menuShelf').addEventListener('click', () => { openMenu(false); renderShelf(); if (typeof shelfDialog.showModal === 'function') shelfDialog.showModal(); else { shelfDialog.classList.add('fallback-open'); shelfDialog.setAttribute('open', ''); } });
 document.getElementById('menuLink').addEventListener('click', () => { openMenu(false); openLinkDialog(); });
 document.querySelectorAll('#linkForm [value="cancel"]').forEach(button => button.addEventListener('click', () => linkDialog.close ? linkDialog.close() : linkDialog.classList.remove('fallback-open')));
@@ -1030,9 +1130,9 @@ document.getElementById('linkForm').addEventListener('submit', async event => {
   try {
     const data = await api('./api/fetch-article', { method: 'POST', body: JSON.stringify({ url }) });
     linkStatus.textContent = `已抓到《${data.title}》，正在放入书架…`;
-    const imp = await api('./api/import', { method: 'POST', body: JSON.stringify({ filename: `${data.title}.html`, title: data.title, blocks: data.blocks }) });
-    const id = genDocId();
-    const doc = { ...imp, id, title: imp.title || data.title, savedAt: Date.now(), source: 'link', kind: 'article' };
+    const imp = await api('./api/import', { method: 'POST', body: JSON.stringify({ filename: `${data.title}.html`, title: data.title, blocks: data.blocks, doc_id: genDocId(), folder: (document.getElementById('linkFolder')?.value || '').trim().slice(0, 20) }) });
+    const id = imp.serverId || genDocId();
+    const doc = { ...imp, id, title: imp.title || data.title, savedAt: Date.now(), source: 'link', kind: 'article', serverId: imp.serverId, folder: (document.getElementById('linkFolder')?.value || '').trim().slice(0, 20) };
     await saveImportedDocument(doc);
     restoreDocument(doc);
     if (typeof linkDialog.close === 'function') linkDialog.close(); else linkDialog.classList.remove('fallback-open');
@@ -1076,7 +1176,8 @@ menuToggle.addEventListener('click', () => openMenu(!mobileMenu.classList.contai
 document.getElementById('menuClose').addEventListener('click', () => openMenu(false));
 document.getElementById('menuSkin').addEventListener('click', () => { openMenu(false); document.getElementById('skinSettings').click(); });
 document.getElementById('menuModel').addEventListener('click', () => { openMenu(false); document.getElementById('modelSettings').click(); });
-document.getElementById('menuImport').addEventListener('click', () => { openMenu(false); document.getElementById('importArticle').click(); });
+document.getElementById('menuImport').addEventListener('click', () => { openMenu(false); pickFiles(false); });
+document.getElementById('menuBatch')?.addEventListener('click', () => { openMenu(false); pickFiles(true); });
 document.addEventListener('pointerdown', event => { if (mobileMenu.classList.contains('open') && !mobileMenu.contains(event.target) && !menuToggle.contains(event.target)) openMenu(false); });
 
 // 稍后阅读
@@ -1134,6 +1235,35 @@ document.getElementById('saveLater').addEventListener('click', () => {
   setResponse('已加入稍后阅读', `《${item.title}》· ${section.label} 已保存，可在左侧“稍后阅读”找回。`);
 });
 document.getElementById('newArticle').addEventListener('click', () => document.getElementById('fileInput').click());
+
+// 导入二级菜单（文件 / 批量 / 链接）与分类弹窗
+function pickFiles(multiple) {
+  const input = document.getElementById('fileInput');
+  if (multiple) input.setAttribute('multiple', ''); else input.removeAttribute('multiple');
+  input.click();
+}
+const importMenuPanel = document.getElementById('importMenuPanel');
+if (importMenuPanel) {
+  document.getElementById('importMenuBtn').addEventListener('click', event => { event.stopPropagation(); importMenuPanel.hidden = !importMenuPanel.hidden; });
+  document.addEventListener('pointerdown', event => { if (!event.target.closest('#importDropdown')) importMenuPanel.hidden = true; });
+  importMenuPanel.addEventListener('click', event => {
+    const btn = event.target.closest('[data-imp]'); if (!btn) return;
+    importMenuPanel.hidden = true;
+    if (btn.dataset.imp === 'file') pickFiles(false);
+    else if (btn.dataset.imp === 'batch') pickFiles(true);
+    else openLinkDialog();
+  });
+}
+const folderDialog = document.getElementById('folderDialog');
+if (folderDialog) {
+  document.querySelectorAll('#folderDialog [value="cancel"]').forEach(button => button.addEventListener('click', () => folderDialog.close ? folderDialog.close() : folderDialog.classList.remove('fallback-open')));
+  document.getElementById('saveFolder').addEventListener('click', event => {
+    event.preventDefault();
+    const val = (document.getElementById('folderName').value || '').trim().slice(0, 20);
+    if (folderTargetId) updateDocMeta(folderTargetId, { folder: val }).then(renderShelf);
+    if (typeof folderDialog.close === 'function') folderDialog.close(); else folderDialog.classList.remove('fallback-open');
+  });
+}
 
 // 本周阅读时长
 const WEEKLY_KEY = 'reading-room-weekly';
