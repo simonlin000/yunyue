@@ -1,3 +1,8 @@
+// 旧浏览器兼容垫片（pdf.js 4.x 需要，微信内置内核等老浏览器没有）
+if (typeof Promise.withResolvers !== 'function') {
+  Promise.withResolvers = function () { let resolve, reject; const promise = new Promise((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; };
+}
+
 const skinPresets = {
   paper: {label:'纸本', note:'干净、克制，适合长时间阅读', paper:'#fbfaf7', ink:'#252522', muted:'#898982', line:'#deddd6', accent:'#c45c36', soft:'#eee8df', panel:'#f8f7f3'},
   ink: {label:'墨黑', note:'低亮度，适合夜间沉浸阅读', paper:'#20201d', ink:'#ece9e2', muted:'#a5a299', line:'#403f3a', accent:'#dc7952', soft:'#302d28', panel:'#1b1b19'},
