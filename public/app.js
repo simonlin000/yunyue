@@ -354,12 +354,11 @@ function render() {
   sectionLabel.textContent = section.label;
   const contentHtml = section.blocks ? section.blocks.map(block => block.type === 'image' ? `<figure class="article-image"><img src="${escapeHtml(block.src)}" alt="${escapeHtml(block.alt || '文中配图')}" decoding="async"><figcaption>${escapeHtml(block.alt || '文中配图')}</figcaption></figure>` : String(block.text || '').split(/\n\s*\n/).filter(Boolean).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')).join('') : section.paragraphs.map(p => `<p>${escapeHtml(p)}</p>`).join('');
   body.innerHTML = `<h3>${escapeHtml(section.label)}</h3>${contentHtml}${section.quote ? `<div class="pullquote">${escapeHtml(section.quote)}</div>` : ''}`;
-  body.querySelectorAll('.article-image img').forEach(img => img.addEventListener('error', () => {
-    if (img.dataset.retried) { img.closest('.article-image').classList.add('img-failed'); return; }
-    img.dataset.retried = '1';
-    const u = img.getAttribute('src') || '';
-    img.src = /^https?:/i.test(u) ? `./api/image-proxy?u=${encodeURIComponent(u)}&sid=${sessionId}` : u + (u.includes('?') ? '&' : '?') + 'r=1';
-  }));
+  body.querySelectorAll('.article-image img').forEach(img => {
+    const src = img.getAttribute('src') || '';
+    if (/^data:/i.test(src)) img.addEventListener('error', () => img.closest('.article-image').classList.add('img-failed'));
+    else hydrateImage(img, src);
+  });
   const isMobileViewport = window.matchMedia('(max-width: 700px)').matches;
   if (isMobileViewport) window.scrollTo({ top: 0, behavior: 'auto' });
   else body.scrollTop = 0;
@@ -406,6 +405,25 @@ tocList.addEventListener('click', (event) => {
   const articleBody = document.getElementById('articleBody');
   if (articleBody) articleBody.scrollTop = 0;
 });
+
+// 配图用 fetch + 会话头加载成 blob，绕开安卓 WebView 的防盗链/缓存/加载中断问题
+async function hydrateImage(img, src, viaProxy = false) {
+  const fig = () => img.closest('.article-image');
+  try {
+    const res = await fetch(src, { headers: apiHeaders });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    if (!/^image\//i.test(blob.type)) throw new Error('返回内容不是图片');
+    img.src = URL.createObjectURL(blob);
+  } catch (err) {
+    if (!viaProxy && /^https?:/i.test(src)) return hydrateImage(img, `./api/image-proxy?u=${encodeURIComponent(src)}&sid=${sessionId}`, true);
+    if (!viaProxy && img.dataset.retried !== '1') { img.dataset.retried = '1'; return hydrateImage(img, src + (src.includes('?') ? '&' : '?') + 'r=1'); }
+    fig().classList.add('img-failed');
+    const cap = fig().querySelector('figcaption');
+    if (cap) cap.textContent = `配图加载失败（${err.message}）· 点图重试`;
+    fig().onclick = () => { fig().classList.remove('img-failed'); delete img.dataset.retried; hydrateImage(img, src); };
+  }
+}
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -550,9 +568,11 @@ let scTimer = null;
 document.addEventListener('selectionchange', () => {
   clearTimeout(scTimer);
   scTimer = setTimeout(() => {
+    const askFocused = selectionAsk.contains(document.activeElement);
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) { if (!selectionAsk.hidden) hideSelectionAsk(); return; }
-    if (!body.contains(sel.anchorNode) || !body.contains(sel.focusNode)) return;
+    if (!sel || sel.isCollapsed) { if (!askFocused && !selectionAsk.hidden) hideSelectionAsk(); return; }
+    if (selectionAsk.contains(sel.anchorNode)) return;
+    if (!body.contains(sel.anchorNode) || !body.contains(sel.focusNode)) { if (!askFocused && !selectionAsk.hidden) hideSelectionAsk(); return; }
     updateSelectionAsk();
   }, 200);
 });
