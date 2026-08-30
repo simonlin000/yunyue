@@ -1002,6 +1002,11 @@ async function parsePdfFile(file, onProgress, signal) {
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, pageCount) }, () => worker()));
   const blocks = [];
   results.forEach(pageBlocks => blocks.push(...pageBlocks));
+  const textChars = blocks.filter(b => b.type === 'text').reduce((n, b) => n + (b.text || '').length, 0);
+  const imgCount = blocks.filter(b => b.type === 'image').length;
+  if (textChars < 100 && (imgCount >= 3 || pageCount >= 3)) {
+    throw new Error('这是影印版/扫描版 PDF（每页都是图片、没有文字层），云阅目前无法提取其中的文字。请换文字版 PDF，或先用 OCR 工具识别后再导入。');
+  }
   return blocks;
 }
 async function parseDocxFile(file) {
